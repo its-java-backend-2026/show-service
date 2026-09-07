@@ -1,0 +1,85 @@
+### =====================================================================
+###  shows-service — G1
+###
+###  Funziona con:
+###    - VS Code + estensione "REST Client" (humao.rest-client)  gratis
+###    - IntelliJ IDEA Ultimate, client HTTP integrato
+###  NON con IntelliJ Community: non ha il client HTTP.
+###
+###  Avvia prima il servizio:
+###    ./mvnw spring-boot:run        (macOS/Linux)
+###    .\mvnw.cmd spring-boot:run    (Windows)
+###
+###  Poi clicca "Send Request" sopra la richiesta (VS Code)
+###  oppure la freccia verde nel margine (IntelliJ Ultimate).
+### =====================================================================
+
+@host = http://localhost:8081
+
+
+### Elenco degli spettacoli
+GET {{host}}/shows
+Accept: application/json
+
+
+### Un singolo spettacolo
+GET {{host}}/shows/1
+Accept: application/json
+
+
+### Uno spettacolo che non esiste  ->  404, non 500
+# "non l'ho trovato" e "mi sono rotto" sono due cose diverse:
+# e' il senso dell'@ExceptionHandler dentro ShowController
+GET {{host}}/shows/999999
+Accept: application/json
+
+
+### Un id che non e' un numero  ->  400
+# lo rifiuta Spring convertendo il @PathVariable, prima del nostro codice.
+# Il corpo e' il formato d'errore di serie di Boot: al G4, con ProblemDetail,
+# cambiera' aspetto. Vale la pena guardarlo adesso per confrontarlo dopo.
+GET {{host}}/shows/abc
+Accept: application/json
+
+
+### Una rotta che non esiste  ->  404
+GET {{host}}/nonesisto
+Accept: application/json
+
+### Un singolo spettacolo
+DELETE {{host}}/shows/2
+Accept: application/json
+
+### crea un singolo spettacolo
+POST {{host}}/shows
+Content-Type: application/json
+
+{
+  "movie": { 
+    "id": 1, 
+    "title": "Dune - Parte Due", 
+    "duration": 166 
+    },
+  "startTime": "2027-05-01T21:30:00",
+  "basePrice": 12.00,
+  "totalSeats": 100
+}
+
+### Aggiorna orario e prezzo  ->  200
+### Il film e i posti totali non si toccano da qui.
+PUT {{host}}/shows/1
+Content-Type: application/json
+
+{
+  "startTime": "2027-01-01T22:45:00",
+  "basePrice": 14.50
+}
+
+### Riserva 2 posti
+### POST e non PUT: non si sostituisce una risorsa, si chiede un'operazione.
+### Non e' idempotente: chiamarla due volte riserva quattro posti.
+POST {{host}}/shows/1/reserve?quantity=2
+
+
+### Rilascia 2 posti
+POST {{host}}/shows/1/release?quantity=2
