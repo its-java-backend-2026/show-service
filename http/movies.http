@@ -1,0 +1,201 @@
+@host = http://localhost:8081
+
+
+### =====================  LETTURA  =====================
+
+### Tutto il catalogo
+GET {{host}}/movies
+Accept: application/json
+
+
+### Ricerca per titolo: parziale e senza distinzione fra maiuscole e minuscole
+### "dune" minuscolo trova "Dune - Parte Due"
+GET {{host}}/movies?title=ar
+Accept: application/json
+
+
+### Ricerca a meta' parola: il frammento sta in mezzo al titolo
+GET {{host}}/movies?title=star
+Accept: application/json
+
+
+### Ricerca senza risultati  ->  200 con lista vuota, NON 404
+GET {{host}}/movies?title=zzzz
+Accept: application/json
+
+
+### Parametro title presente ma vuoto  ->  400
+GET {{host}}/movies?title=
+Accept: application/json
+
+
+### Un singolo film
+GET {{host}}/movies/1
+Accept: application/json
+
+
+### Un film che non esiste  ->  404
+GET {{host}}/movies/999999
+Accept: application/json
+
+
+### Un id che non e' un numero  ->  400
+GET {{host}}/movies/abc
+Accept: application/json
+
+
+### =====================  CREAZIONE  =====================
+
+### Crea un film  ->  201 con header Location
+POST {{host}}/movies
+Content-Type: application/json
+
+{
+  "title": "Star Wars: L'attacco dei Cloni",
+  "durationMinutes": 187
+}
+
+
+### Lo stesso titolo una seconda volta  ->  409
+POST {{host}}/movies
+Content-Type: application/json
+
+{
+  "title": "Star Wars: L'Ascesa di Skywalker",
+  "durationMinutes": 187
+}
+
+
+### Un id inviato nella POST viene IGNORATO
+POST {{host}}/movies
+Content-Type: application/json
+
+{
+  "id": 999,
+  "title": "L'armata Brancaleone",
+  "durationMinutes": 89
+}
+
+
+### Titolo mancante  ->  400
+POST {{host}}/movies
+Content-Type: application/json
+
+{
+  "durationMinutes": 100
+}
+
+
+### Titolo fatto di soli spazi  ->  400
+POST {{host}}/movies
+Content-Type: application/json
+
+{
+  "title": "   ",
+  "durationMinutes": 100
+}
+
+
+### Durata non positiva  ->  400
+POST {{host}}/movies
+Content-Type: application/json
+
+{
+  "title": "Film a durata zero",
+  "durationMinutes": 0
+}
+
+
+### =====================  MODIFICA  =====================
+
+### Aggiorna un film  ->  200
+### PUT: si inviano TUTTI i campi modificabili, non solo quelli cambiati.
+PUT {{host}}/movies/3
+Content-Type: application/json
+
+{
+  "title": "Perfect Days",
+  "durationMinutes": 125
+}
+
+
+### Lo stesso titolo di prima non e' un conflitto con se stesso
+PUT {{host}}/movies/3
+Content-Type: application/json
+
+{
+  "title": "Perfect Days",
+  "durationMinutes": 124
+}
+
+
+### Un titolo che appartiene gia' a un altro film  ->  409
+PUT {{host}}/movies/3
+Content-Type: application/json
+
+{
+  "title": "Oppenheimer",
+  "durationMinutes": 124
+}
+
+
+### L'id nel corpo puo' esserci, ma deve coincidere con quello dell'URL
+### Qui coincide  ->  200
+PUT {{host}}/movies/3
+Content-Type: application/json
+
+{
+  "id": 3,
+  "title": "Perfect Days",
+  "durationMinutes": 124
+}
+
+
+### Id discordante fra corpo e URL  ->  400
+### senza dirglielo.
+PUT {{host}}/movies/3
+Content-Type: application/json
+
+{
+  "id": 99,
+  "title": "Perfect Days",
+  "durationMinutes": 124
+}
+
+
+### Aggiornare un film che non esiste  ->  404
+PUT {{host}}/movies/999999
+Content-Type: application/json
+
+{
+  "title": "Fantasma",
+  "durationMinutes": 100
+}
+
+
+### =====================  ELIMINAZIONE  =====================
+
+### Eliminare un film in programmazione  ->  409
+DELETE {{host}}/movies/1
+Accept: application/json
+
+
+### Elimina un film non programmato  ->  204, nessun corpo
+DELETE {{host}}/movies/4
+Accept: application/json
+
+
+### Eliminare due volte lo stesso film  ->  404 la seconda volta
+DELETE {{host}}/movies/4
+Accept: application/json
+
+
+### Eliminare un film che non esiste  ->  404
+DELETE {{host}}/movies/999999
+Accept: application/json
+
+
+### =====================  DOCUMENTAZIONE  =====================
+
+### Swagger UI (aprilo nel browser, non da qui)
+### http://localhost:8081/swagger-ui.html

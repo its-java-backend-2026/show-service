@@ -11,6 +11,7 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import it.its.cinema.showsservice.domain.MovieNotFoundException;
 import it.its.cinema.showsservice.domain.Show;
 import it.its.cinema.showsservice.domain.ShowNotFoundException;
 import it.its.cinema.showsservice.service.ShowService;
@@ -123,7 +124,13 @@ public class ShowController {
     })
     @PostMapping
     public ResponseEntity<Show> crea(@RequestBody Show richiesta) {
-        Show creato = service.addShow(richiesta);
+        // Si passano al service solo i quattro campi che il client puo'
+        // decidere: id e availableSeats eventualmente inviati muoiono qui.
+        Show creato = service.create(
+                richiesta.getMovie() == null ? null : richiesta.getMovie().getId(),
+                richiesta.getStartTime(),
+                richiesta.getBasePrice(),
+                richiesta.getTotalSeats());
 
         // 201 con Location: il client sa dove e' finita la risorsa che ha
         // creato, senza doverla cercare. E' meta' del significato di "created".
@@ -216,6 +223,31 @@ public class ShowController {
     @ExceptionHandler(ShowNotFoundException.class)
     @ResponseStatus(HttpStatus.NOT_FOUND)
     public String notFound(ShowNotFoundException e) {
+        return e.getMessage();
+    }
+
+    /**
+     * Anche "il film non esiste" e' un 404, e non un 500: senza questo handler
+     * la POST finirebbe contro il vincolo di foreign key e il client leggerebbe
+     * "errore interno" per un dato sbagliato che ha mandato lui.
+     */
+    @Hidden
+    @ExceptionHandler(MovieNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public String movieNotFound(MovieNotFoundException e) {
+        return e.getMessage();
+    }
+
+    /**
+     * Le validazioni del dominio (prezzo negativo, posti non positivi,
+     * quantita' a zero) lanciano IllegalArgumentException: senza questo
+     * handler sarebbero 500, mentre sono richieste sbagliate del client.
+     * E' il 400 che gli @ApiResponse qui sopra promettono da subito.
+     */
+    @Hidden
+    @ExceptionHandler(IllegalArgumentException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public String badRequest(IllegalArgumentException e) {
         return e.getMessage();
     }
 }

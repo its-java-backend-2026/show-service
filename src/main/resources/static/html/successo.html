@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Spettacolo creato — shows-service</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      max-width: 34rem; margin: 3rem auto; padding: 0 1.25rem;
+      color: #1a1a1e; line-height: 1.5;
+    }
+    h1 { font-size: 1.5rem; margin-bottom: .25rem; }
+    .spunta { color: #0f7b3f; font-size: 2rem; line-height: 1; }
+    p.sottotitolo { color: #5a5a63; margin-top: 0; }
+    dl {
+      margin: 1.5rem 0 0; padding: 1rem 1.15rem;
+      border: 1px solid #d0d0d5; border-radius: .35rem;
+      display: grid; grid-template-columns: auto 1fr; gap: .5rem 1.25rem;
+    }
+    dt { font-weight: 600; font-size: .9rem; color: #5a5a63; }
+    dd { margin: 0; }
+    a { display: inline-block; margin-top: 1.75rem; color: #1a1a1e; }
+    #errore {
+      margin-top: 1.5rem; padding: .8rem 1rem; border-radius: .35rem;
+      border: 1px solid #b3261e; color: #b3261e; background: #fdf2f1;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="spunta">&check;</div>
+  <h1>Spettacolo creato</h1>
+  <p class="sottotitolo">Il server ha risposto <strong>201 Created</strong> con
+    l'header <code>Location</code>: e' li' che vive la risorsa appena creata.</p>
+
+  <!--
+    Questa pagina NON si fida di quello che ha inviato il form: prende l'id
+    dalla query string e rilegge lo spettacolo con GET /shows/{id}. Cosi' quello
+    che vedi e' lo stato vero del database, id e posti disponibili compresi,
+    che sono decisi dal server e non dal client.
+  -->
+  <dl id="dettaglio" hidden>
+    <dt>ID</dt>          <dd id="d-id"></dd>
+    <dt>Film</dt>        <dd id="d-film"></dd>
+    <dt>Inizio</dt>      <dd id="d-inizio"></dd>
+    <dt>Prezzo base</dt> <dd id="d-prezzo"></dd>
+    <dt>Posti</dt>       <dd id="d-posti"></dd>
+    <dt>Serale</dt>      <dd id="d-serale"></dd>
+  </dl>
+
+  <div id="errore" hidden></div>
+
+  <a href="nuovo-show.html">&larr; Creane un altro</a>
+
+  <script src="shows.js"></script>
+</body>
+</html>

@@ -46,7 +46,7 @@ Accept: application/json
 GET {{host}}/nonesisto
 Accept: application/json
 
-### Un singolo spettacolo
+### Elimina uno spettacolo  ->  204, nessun corpo
 DELETE {{host}}/shows/2
 Accept: application/json
 
@@ -55,13 +55,10 @@ POST {{host}}/shows
 Content-Type: application/json
 
 {
-  "movie": { 
-    "id": 1, 
-    "title": "Dune - Parte Due", 
-    "duration": 166 
-    },
+  "movie": {  "id": 1},
   "startTime": "2027-05-01T21:30:00",
   "basePrice": 12.00,
+  "availableSeats": 100,
   "totalSeats": 100
 }
 

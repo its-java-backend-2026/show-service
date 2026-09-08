@@ -5,8 +5,10 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import it.its.cinema.showsservice.domain.Movie;
+import it.its.cinema.showsservice.domain.MovieNotFoundException;
 import it.its.cinema.showsservice.domain.Show;
 import it.its.cinema.showsservice.domain.ShowNotFoundException;
+import it.its.cinema.showsservice.repository.MovieRepository;
 import it.its.cinema.showsservice.repository.ShowRepository;
 import org.springframework.stereotype.Service;
 
@@ -32,6 +34,7 @@ import lombok.extern.slf4j.Slf4j;
 public class ShowService {
 
     private final ShowRepository repository;
+    private final MovieRepository movieRepository;
 
     public List<Show> findAll() {
         return repository.findAll();
@@ -81,6 +84,39 @@ public class ShowService {
         log.info("aggiunto lo spettacolo {} ({} posti)",
                 show.getId(), show.getTotalSeats());
         return repository.save(show);
+    }
+
+    /**
+     * Crea uno spettacolo A PARTIRE DAI DATI DELLA RICHIESTA.
+     *
+     * E' questo che usa POST /shows, e non addShow, per due ragioni.
+     *
+     * 1. IL FILM VA RISOLTO. Il client manda un movieId; il database vuole una
+     *    riga che esista davvero. Rileggendolo qui, un film inesistente diventa
+     *    una MovieNotFoundException -> 404 "il film non c'e'", invece di una
+     *    violazione di foreign key -> 500 "mi sono rotto". E lo Show salvato si
+     *    porta dietro il film vero, non lo stub {id: 1, title: null} arrivato
+     *    dalla richiesta.
+     *
+     * 2. id E availableSeats NON SONO DATI DEL CLIENT, SONO CONSEGUENZE. Qui
+     *    nemmeno arrivano: la firma prende solo i quattro campi che il client
+     *    ha il diritto di decidere. L'id lo assegna il database; i posti
+     *    disponibili li calcola il costruttore di Show, che parte pieno.
+     *    Una firma che non accetta un dato e' piu' solida di un commento che
+     *    ricorda di ignorarlo.
+     */
+    public Show create(Long movieId, LocalDateTime startTime, BigDecimal basePrice, int totalSeats) {
+        if (movieId == null) {
+            throw new IllegalArgumentException("movie.id e' obbligatorio");
+        }
+        Movie movie = movieRepository.findById(movieId)
+                .orElseThrow(() -> new MovieNotFoundException(movieId));
+
+        // le altre validazioni le fa il costruttore: la regola sta nel dominio
+        Show creato = repository.save(new Show(null, movie, startTime, basePrice, totalSeats));
+        log.info("creato lo spettacolo {} per il film {} ({} posti)",
+                creato.getId(), movieId, totalSeats);
+        return creato;
     }
 
     /**

@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Nuovo spettacolo — shows-service</title>
+  <style>
+    :root { --bordo: #d0d0d5; --errore: #b3261e; }
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      max-width: 34rem; margin: 3rem auto; padding: 0 1.25rem;
+      color: #1a1a1e; line-height: 1.5;
+    }
+    h1 { font-size: 1.5rem; margin-bottom: .25rem; }
+    p.sottotitolo { color: #5a5a63; margin-top: 0; }
+    label { display: block; margin-top: 1.1rem; font-weight: 600; font-size: .9rem; }
+    .aiuto { font-weight: 400; color: #5a5a63; font-size: .85rem; }
+    input {
+      width: 100%; box-sizing: border-box; margin-top: .3rem;
+      padding: .55rem .65rem; font: inherit;
+      border: 1px solid var(--bordo); border-radius: .35rem;
+    }
+    button {
+      margin-top: 1.75rem; padding: .6rem 1.4rem; font: inherit; font-weight: 600;
+      color: #fff; background: #1a1a1e; border: 0; border-radius: .35rem; cursor: pointer;
+    }
+    button[disabled] { opacity: .5; cursor: progress; }
+    #errore {
+      margin-top: 1.5rem; padding: .8rem 1rem; border-radius: .35rem;
+      border: 1px solid var(--errore); color: var(--errore); background: #fdf2f1;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Nuovo spettacolo</h1>
+  <p class="sottotitolo">Il form non ricarica la pagina: invia i dati a
+    <code>POST /shows</code> con una chiamata AJAX.</p>
+
+  <!--
+    novalidate NO: la validazione del browser (required, min, type) e' gratis e
+    serve a non disturbare il server per un campo vuoto. Non SOSTITUISCE quella
+    del server, che resta l'unica di cui fidarsi: chiunque puo' aprire la
+    console e chiamare l'API senza passare da qui.
+  -->
+  <form id="form-show">
+    <label>
+      ID del film
+      <span class="aiuto">— deve esistere gia' nel catalogo (1 = Dune, 2 = Oppenheimer, 3 = Perfect Days)</span>
+      <input type="number" name="movieId" min="1" step="1" value="1" required>
+    </label>
+
+    <label>
+      Orario di inizio
+      <input type="datetime-local" name="startTime" value="2027-05-01T21:30" required>
+    </label>
+
+    <label>
+      Prezzo base
+      <span class="aiuto">— in euro, due decimali</span>
+      <input type="number" name="basePrice" min="0" step="0.01" value="12.00" required>
+    </label>
+
+    <label>
+      Posti totali
+      <span class="aiuto">— i posti disponibili non si inviano: li calcola il server</span>
+      <input type="number" name="totalSeats" min="1" step="1" value="100" required>
+    </label>
+
+    <button type="submit" id="invia">Crea spettacolo</button>
+  </form>
+
+  <!-- hidden e non display:none nel CSS: lo stato lo tiene l'attributo, non lo stile -->
+  <div id="errore" hidden></div>
+
+  <script src="shows.js"></script>
+</body>
+</html>

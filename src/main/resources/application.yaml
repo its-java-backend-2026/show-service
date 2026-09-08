@@ -3,3 +3,26 @@ server:
 spring:
   application:
     name: shows-service
+  datasource:
+    url: ${SHOWS_DB_URL:jdbc:postgresql://localhost:5432/shows_db}
+    username: ${SHOWS_DB_USER:cinema}
+    password: ${SHOWS_DB_PASSWORD:cinema}
+
+  jpa:
+    hibernate:
+      # lo schema lo fa Flyway: Hibernate si limita a verificare che combaci.
+      # MAI ddl-auto: update in produzione — cambia il database di nascosto
+      # e nessuno sa piu' che struttura ha davvero.
+      ddl-auto: validate
+    # DA SPEGNERE SEMPRE: con open-in-view la sessione JPA resta aperta fino
+    # alla fine della risposta HTTP, e le query partono durante la
+    # serializzazione, fuori da qualsiasi transazione. Al G3 si vedra' perche'.
+    open-in-view: false
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
