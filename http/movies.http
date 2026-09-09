@@ -3,7 +3,13 @@
 
 ### =====================  LETTURA  =====================
 
-### Tutto il catalogo
+### Tutto il catalogo — PAGINATO dal passo 3.4
+###
+### ATTENZIONE alla forma della risposta: non e' piu' un array di film, e'
+### un oggetto. I film stanno dentro "content", accanto a totalElements,
+### totalPages, number (la pagina corrente, da 0) e size.
+### Senza parametri valgono i default di @PageableDefault:
+### page 0, size 20, ordinato per titolo crescente.
 GET {{host}}/movies
 Accept: application/json
 
@@ -19,7 +25,9 @@ GET {{host}}/movies?title=star
 Accept: application/json
 
 
-### Ricerca senza risultati  ->  200 con lista vuota, NON 404
+### Ricerca senza risultati  ->  200 con pagina vuota, NON 404
+### content e' [], totalElements e' 0: una ricerca che non trova niente ha
+### comunque avuto successo.
 GET {{host}}/movies?title=zzzz
 Accept: application/json
 
@@ -29,7 +37,60 @@ GET {{host}}/movies?title=
 Accept: application/json
 
 
+### =====================  PAGINAZIONE (passo 3.4)  =====================
+
+### Prima pagina, due film per volta
+### Guardare totalPages: con tre film in catalogo sono 2.
+GET {{host}}/movies?page=0&size=2
+Accept: application/json
+
+
+### Seconda pagina degli stessi risultati
+### number passa a 1, content contiene il film rimasto.
+GET {{host}}/movies?page=1&size=2
+Accept: application/json
+
+
+### Una pagina oltre la fine  ->  200 con content vuoto, NON 404
+### Chiedere la pagina 50 di un catalogo da tre film non e' un errore:
+### e' una domanda legittima con risposta "non c'e' niente qui".
+GET {{host}}/movies?page=50&size=2
+Accept: application/json
+
+
+### Ordinamento decrescente per titolo
+### sort vuole nome del campo dell'ENTITA', non della colonna: title, non
+### il nome SQL. Per la durata sarebbe durationMinutes, non minutes.
+GET {{host}}/movies?sort=title,desc
+Accept: application/json
+
+
+### Ordinamento per un altro campo: i film piu' lunghi per primi
+GET {{host}}/movies?sort=durationMinutes,desc&size=5
+Accept: application/json
+
+
+### Due criteri di ordinamento: si ripete il parametro sort
+GET {{host}}/movies?sort=durationMinutes,desc&sort=title,asc
+Accept: application/json
+
+
+### Ordinare per un campo che non esiste  ->  500
+### Spring non puo' validarlo: lo scopre Hibernate quando costruisce la
+### query. E' il motivo per cui al G4 il sort si limita a una lista bianca.
+GET {{host}}/movies?sort=nonesisto,asc
+Accept: application/json
+
+
+### Paginazione E ricerca insieme: i due parametri si combinano
+### Nei log si vede la query "lower(title) like ?" con limit e offset.
+GET {{host}}/movies?title=a&page=0&size=2&sort=title,asc
+Accept: application/json
+
+
 ### Un singolo film
+### Dal passo 3.7 il JSON contiene anche "version": e' il contatore del
+### lock ottimistico, e sale di uno a ogni modifica andata a buon fine.
 GET {{host}}/movies/1
 Accept: application/json
 
@@ -193,6 +254,48 @@ Accept: application/json
 ### Eliminare un film che non esiste  ->  404
 DELETE {{host}}/movies/999999
 Accept: application/json
+
+
+### =====================  CONCORRENZA (passi 3.7 / 3.8)  =====================
+
+### Leggere version PRIMA
+### Segnarsi il valore: la PUT qui sotto lo fa salire di uno.
+GET {{host}}/movies/3
+Accept: application/json
+
+
+### Una modifica qualsiasi  ->  200, e version passa da N a N+1
+PUT {{host}}/movies/3
+Content-Type: application/json
+
+{
+  "title": "Perfect Days",
+  "durationMinutes": 123
+}
+
+
+### Rileggere per vedere version aumentato
+GET {{host}}/movies/3
+Accept: application/json
+
+
+### Il conflitto vero non si riproduce cliccando: serve che due transazioni
+### leggano la STESSA version e scrivano entrambe. A mano le due richieste
+### arrivano in fila e la seconda rilegge una version gia' aggiornata.
+###
+### Per vederlo davvero, da terminale:
+###   for i in 1 2 3 4 5 6 7 8; do \
+###     curl -s -o /dev/null -w "%{http_code}\n" -X PUT \
+###       -H 'Content-Type: application/json' \
+###       -d '{"title":"Perfect Days","durationMinutes":124}' \
+###       http://localhost:8081/movies/3 & \
+###   done; wait
+###
+### Fra i 200 compare qualche 409: e' OptimisticLockingFailureException
+### tradotta dall'handler del passo 3.8. 409 e non 500 perche' la richiesta
+### era legittima e riprovare ha ottime probabilita' di riuscire.
+### Lo stesso meccanismo, sugli spettacoli, e' quello che impedisce di
+### vendere due volte l'ultima poltrona.
 
 
 ### =====================  DOCUMENTAZIONE  =====================
