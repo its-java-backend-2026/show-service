@@ -32,7 +32,20 @@ public class Show {
      * Al G3 lo si guarda nei log e lo si risolve. Oggi si lascia com'e',
      * di proposito: prima si vede il problema, poi si impara la soluzione.
      */
-    @ManyToOne(optional = false)
+    /**
+     * PASSO 3.1 — LAZY ESPLICITO.
+     *
+     * @ManyToOne di default e' EAGER: e' la trappola meglio nascosta di JPA.
+     * Ieri ogni spettacolo si tirava dietro il suo film sempre, anche quando
+     * non serviva, e su GET /shows generava una query per l'elenco piu' una
+     * per ogni film distinto: il problema N+1.
+     *
+     * Con LAZY il film si carica solo se qualcuno lo chiede. Ma attenzione:
+     * con open-in-view: false, "qualcuno lo chiede" fuori dalla transazione
+     * significa LazyInitializationException. Per questo il repository ha
+     * @EntityGraph: il film si carica NELLA STESSA query, quando serve.
+     */
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "movie_id", nullable = false)
     private Movie movie;
 
@@ -52,6 +65,21 @@ public class Show {
 
     @Column(name = "available_seats", nullable = false)
     private int availableSeats;
+
+    /**
+     * PASSO 3.7 — LOCK OTTIMISTICO.
+     *
+     * Il problema, senza: due clienti, ultimi due posti. Entrambi leggono
+     * availableSeats = 2, entrambi calcolano 0, entrambi scrivono 0.
+     * Quattro biglietti venduti, due poltrone, e il database e' perfettamente
+     * coerente: nessun vincolo e' stato violato. E' il "lost update".
+     *
+     * Con @Version, ogni UPDATE porta in coda "AND version = <letta>".
+     * Chi arriva secondo aggiorna zero righe, e Hibernate lo traduce in
+     * OptimisticLockingFailureException. Nessun lock tenuto, nessuna attesa.
+     */
+    @Version
+    private Long version;
 
     /**
      * L'id non e' piu' un parametro: lo assegna il database.

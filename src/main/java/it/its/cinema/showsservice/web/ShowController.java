@@ -1,6 +1,7 @@
 package it.its.cinema.showsservice.web;
 
 import java.net.URI;
+import java.time.LocalDateTime;
 import java.util.List;
 
 import io.swagger.v3.oas.annotations.Hidden;
@@ -15,6 +16,12 @@ import it.its.cinema.showsservice.domain.MovieNotFoundException;
 import it.its.cinema.showsservice.domain.Show;
 import it.its.cinema.showsservice.domain.ShowNotFoundException;
 import it.its.cinema.showsservice.service.ShowService;
+import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.web.PageableDefault;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -49,20 +56,41 @@ public class ShowController {
 
     private final ShowService service;
 
-    /** GET /shows */
-    @Operation(
-            summary = "Elenca gli spettacoli",
-            description = "Restituisce tutti gli spettacoli in programmazione, "
-                    + "ordinati per orario di inizio crescente. "
-                    + "Dal G3 questa rotta sara' paginata.")
-    @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "Elenco restituito, anche vuoto",
-                    content = @Content(mediaType = "application/json",
-                            array = @ArraySchema(schema = @Schema(implementation = Show.class))))
-    })
+    /**
+     * PASSO 3.4 — paginazione e ordinamento.
+     *
+     * Un elenco senza limiti e' una bomba a orologeria: funziona con tre
+     * righe e affoga con trecentomila. Pageable arriva dai parametri della
+     * query, @PageableDefault decide cosa fare quando non ci sono.
+     * Provare:  GET /shows?page=0&size=5&sort=startTime,desc
+     */
+     @Operation(summary = "Elenca gli spettacoli",
+            description = "Elenco paginato, ordinato per orario di inizio. "
+                    + "Parametri: page, size, sort (es. startTime,desc).")
+    @ApiResponses(@ApiResponse(responseCode = "200", description = "Pagina restituita, anche vuota",
+            content = @Content(mediaType = "application/json",
+                    array = @ArraySchema(schema = @Schema(implementation = Show.class)))))
     @GetMapping
-    public List<Show> findAll() {
-        return service.findAll();
+    public Page<Show> findAll(
+            @PageableDefault(size = 20, sort = "startTime", direction = Sort.Direction.ASC)
+            Pageable pageable) {
+        return service.findAll(pageable);
+    }
+
+    /** PASSO 3.5 — la query di dominio: spettacoli di un film fra due date. */
+    @Operation(summary = "Spettacoli di un film in un intervallo di date")
+    @ApiResponses(@ApiResponse(responseCode = "200", description = "Elenco restituito",
+            content = @Content(mediaType = "application/json",
+                    array = @ArraySchema(schema = @Schema(implementation = Show.class)))))
+    @GetMapping("/ricerca")
+    public List<Show> ricerca(
+            @Parameter(description = "Identificativo del film", example = "1")
+            @RequestParam Long movieId,
+            @Parameter(description = "Inizio dell'intervallo", example = "2026-10-01T00:00:00")
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime da,
+            @Parameter(description = "Fine dell'intervallo", example = "2026-10-31T23:59:59")
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime a) {
+        return service.perFilmEIntervallo(movieId, da, a);
     }
 
     /** GET /shows/{id} — 200 se c'e', 404 se non c'e'. */
@@ -249,5 +277,20 @@ public class ShowController {
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public String badRequest(IllegalArgumentException e) {
         return e.getMessage();
+    }
+
+    /**
+     * PASSO 3.8 — il conflitto di concorrenza e' un 409, non un 500.
+     *
+     * 500 vuol dire "colpa nostra, riprovare non serve". Qui invece la
+     * richiesta era legittima e riprovare ha ottime probabilita' di riuscire:
+     * e' esattamente cosa significa 409 Conflict.
+     */
+    @Hidden
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public String conflittoDiConcorrenza(OptimisticLockingFailureException e) {
+        return "Qualcun altro ha modificato lo spettacolo mentre completavi "
+                + "l'operazione. Riprova.";
     }
 }
