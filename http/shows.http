@@ -71,7 +71,7 @@ Content-Type: application/json
 
 {
   "startTime": "2027-01-01T22:45:00",
-  "basePrice": 18.50
+  "basePrice": 18.60
 }
 
 ### Riserva 2 posti
@@ -92,3 +92,40 @@ Accept: application/json
 GET {{host}}/shows/ricerca?movieId=1&da=2026-10-01T00:00:00&a=2026-10-31T23:59:59
 Accept: application/json
 
+
+### =====================================================================
+###  Catalogo film — le stesse modifiche del G3, lato movie
+### =====================================================================
+
+### Elenco dei film — paginato (passo 3.4)
+### Il JSON NON e' piu' un array: e' un oggetto con content, totalElements,
+### totalPages, number, size. Il default e' page 0, size 20, sort title asc.
+GET {{host}}/movies
+
+###
+### Seconda pagina, cinque per volta, dal titolo Z alla A
+GET {{host}}/movies?page=1&size=5&sort=title,desc
+
+###
+### Ricerca per frammento di titolo — anche questa paginata
+### Nei log si vede: lower(title) like ? -> seq scan, l'indice non serve
+GET {{host}}/movies?title=du&size=5
+
+###
+### Ricerca con titolo vuoto  ->  400
+GET {{host}}/movies?title=
+
+###
+### Lock ottimistico (passo 3.7): il campo version compare nel JSON
+GET {{host}}/movies/1
+
+###
+### Aggiorna un film  ->  200, e version passa da 0 a 1
+### Due PUT simultanei sullo stesso film: il secondo prende 409 (passo 3.8)
+PUT {{host}}/movies/1
+Content-Type: application/json
+
+{
+  "title": "Dune - Parte Due",
+  "durationMinutes": 167
+}

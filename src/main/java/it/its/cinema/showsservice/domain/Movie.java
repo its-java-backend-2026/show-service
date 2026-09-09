@@ -25,6 +25,25 @@ public class Movie {
     private int durationMinutes;
 
     /**
+     * PASSO 3.7 — LOCK OTTIMISTICO, anche sul catalogo.
+     *
+     * Sul film non si perdono poltrone, si perdono modifiche: due redattori
+     * aprono lo stesso film, uno corregge il titolo, l'altro la durata, e chi
+     * salva per secondo riscrive anche il campo che non ha toccato. E' lo
+     * stesso "lost update" degli spettacoli, con conseguenze meno vistose.
+     *
+     * Con @Version ogni UPDATE porta in coda "AND version = <letta>": chi
+     * arriva secondo aggiorna zero righe e Hibernate solleva
+     * OptimisticLockingFailureException, che il controller traduce in 409.
+     *
+     * ATTENZIONE: version NON compare nei costruttori qui sotto. Lo gestisce
+     * Hibernate, e ogni costruttore con argomenti in piu' e' un'altra
+     * occasione per il problema Jackson descritto sopra.
+     */
+    @Version
+    private Long version;
+
+    /**
      * ATTENZIONE Boot 4 / Jackson 3 — questa riga sembra inutile e non lo e'.
      *
      * Jackson 3 promuove automaticamente un costruttore con argomenti a

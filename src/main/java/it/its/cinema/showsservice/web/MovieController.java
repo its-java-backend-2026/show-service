@@ -1,12 +1,10 @@
 package it.its.cinema.showsservice.web;
 
 import java.net.URI;
-import java.util.List;
 
 import io.swagger.v3.oas.annotations.Hidden;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
-import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -16,6 +14,11 @@ import it.its.cinema.showsservice.domain.MovieInUseException;
 import it.its.cinema.showsservice.domain.MovieNotFoundException;
 import it.its.cinema.showsservice.domain.MovieTitleAlreadyExistsException;
 import it.its.cinema.showsservice.service.MovieService;
+import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -45,25 +48,41 @@ public class MovieController {
     /**
      * GET /movies-> tutto il catalogo
      * GET /movies?title=du -> solo i film il cui titolo contiene "du"
+     *
+     * PASSO 3.4 — paginazione e ordinamento, come su GET /shows.
+     *
+     * Un elenco senza limiti e' una bomba a orologeria: funziona con tre righe
+     * e affoga con trecentomila. Pageable arriva dai parametri della query,
+     * @PageableDefault decide cosa fare quando non ci sono.
+     * Provare:  GET /movies?page=0&size=5&sort=title,desc
+     *
+     * ATTENZIONE: cambia la forma del JSON. Prima era un array di film, ora e'
+     * un oggetto con content, totalElements, totalPages, number, size. Chi
+     * consuma questa rotta va avvisato: e' un cambiamento incompatibile.
      */
     @Operation(
             summary = "Elenca o cerca i film",
-            description = "Senza parametri restituisce tutto il catalogo. "
+            description = "Senza parametri restituisce il catalogo paginato. "
                     + "Con ?title= restituisce i film il cui titolo contiene il "
                     + "frammento indicato, ignorando maiuscole e minuscole. "
-                    + "Una ricerca senza risultati e' un 200 con lista vuota, non un 404.")
+                    + "Una ricerca senza risultati e' un 200 con pagina vuota, non un 404. "
+                    + "Parametri di paginazione: page, size, sort (es. title,desc).")
     @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "Elenco restituito, anche vuoto",
+            @ApiResponse(responseCode = "200", description = "Pagina restituita, anche vuota",
                     content = @Content(mediaType = "application/json",
-                            array = @ArraySchema(schema = @Schema(implementation = Movie.class)))),
+                            schema = @Schema(implementation = Movie.class))),
             @ApiResponse(responseCode = "400", description = "Il parametro title e' presente ma vuoto",
                     content = @Content)
     })
     @GetMapping
-    public List<Movie> findAll(
+    public Page<Movie> findAll(
             @Parameter(description = "Frammento di titolo da cercare", example = "dune")
-            @RequestParam(required = false) String title) {
-        return title == null ? service.findAll() : service.searchByTitle(title);
+            @RequestParam(required = false) String title,
+            @PageableDefault(size = 20, sort = "title", direction = Sort.Direction.ASC)
+            Pageable pageable) {
+        return title == null
+                ? service.findAll(pageable)
+                : service.searchByTitle(title, pageable);
     }
 
     /** GET /movies/{id} — 200 se c'e', 404 se non c'e'. */
@@ -210,5 +229,24 @@ public class MovieController {
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public String badRequest(IllegalArgumentException e) {
         return e.getMessage();
+    }
+
+    /**
+     * PASSO 3.8 — il conflitto di concorrenza e' un 409, non un 500.
+     *
+     * 500 vuol dire "colpa nostra, riprovare non serve". Qui invece la
+     * richiesta era legittima e riprovare ha ottime probabilita' di riuscire:
+     * e' esattamente cosa significa 409 Conflict.
+     *
+     * Nota: questo handler e' identico a quello di ShowController, e cosi'
+     * sono notFound e badRequest. E' il segnale che serve un
+     * @RestControllerAdvice — materiale del G4, insieme ai DTO.
+     */
+    @Hidden
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public String conflittoDiConcorrenza(OptimisticLockingFailureException e) {
+        return "Qualcun altro ha modificato il film mentre completavi "
+                + "l'operazione. Riprova.";
     }
 }

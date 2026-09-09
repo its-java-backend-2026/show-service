@@ -79,7 +79,7 @@ class ShowRepositoryIT {
 
     private Long spettacoloCon(int posti) {
         return tx.execute(stato -> {
-            Movie film = movieRepository.save(new Movie("Film di prova 3" + System.nanoTime(), 100));
+            Movie film = movieRepository.save(new Movie("Film di prova 4" + System.nanoTime(), 100));
             // il primo argomento e' l'id: null perche' lo assegna il database
             Show show = new Show(null, film, LocalDateTime.of(2026, 11, 1, 21, 0),
                     new BigDecimal("10.00"), posti);

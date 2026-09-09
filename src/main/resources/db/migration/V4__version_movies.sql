@@ -1,0 +1,25 @@
+-- PASSO 3.7 — la colonna che rende possibile il lock ottimistico sul catalogo.
+--
+-- La V3 l'ha aggiunta a shows, qui tocca a movies: @Version su un'entita' non
+-- basta se la colonna non c'e', e Hibernate fallirebbe all'avvio.
+--
+-- Una migrazione gia' applicata NON SI MODIFICA MAI: la V3 resta com'e' e
+-- questo cambiamento viaggia su un file nuovo, come vuole Flyway.
+--
+-- DEFAULT 0 e' obbligatorio: le righe gia' inserite dalla V2 devono avere un
+-- valore, altrimenti NOT NULL fallisce.
+ALTER TABLE movies ADD COLUMN version BIGINT NOT NULL DEFAULT 0;
+
+-- NESSUN INDICE, ed e' una scelta, non una dimenticanza.
+--
+-- Le ricerche esatte (findByTitle, existsByTitle) usano gia' l'indice che
+-- PostgreSQL crea da solo per il vincolo uk_movies_title della V1.
+--
+-- La ricerca parziale findByTitleContainingIgnoreCase genera invece
+--     lower(title) like '%dune%'
+-- e un indice btree NON si puo' usare con il wildcard iniziale: il database
+-- scandisce comunque tutta la tabella. Verificarlo con EXPLAIN vale piu' di
+-- un indice inutile. La cura, quando servira', e' un indice di tipo diverso:
+--     CREATE EXTENSION IF NOT EXISTS pg_trgm;
+--     CREATE INDEX idx_movies_title_trgm
+--         ON movies USING gin (lower(title) gin_trgm_ops);
