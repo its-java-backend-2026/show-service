@@ -1,5 +1,8 @@
 HELP.md
 target/
+
+### G5 — i segreti non si committano: nel repository ci va .env.example
+.env
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/

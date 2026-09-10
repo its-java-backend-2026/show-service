@@ -1,0 +1,82 @@
+# PASSO 5.5 — il sistema completo del G5: un servizio e il suo database.
+#
+#   docker compose up --build     costruisce e avvia
+#   docker compose down           ferma, i dati restano
+#   docker compose down -v        ferma E CANCELLA i dati
+#
+# Nota: "version:" in cima non si scrive piu' da Compose v2, e' obsoleto.
+#
+# Qui il file sta DENTRO il repository del servizio (build: .), cosi' chi
+# clona la cartella ha tutto e il "solo comando" funziona davvero. Al G6,
+# quando accanto a shows-service nasceranno gli altri servizi, questo file
+# salira' di un livello e i build: diventeranno ./shows-service, ./bookings...
+
+services:
+
+  shows-db:
+    image: postgres:17-alpine
+    container_name: shows-db
+    environment:
+      POSTGRES_DB: ${SHOWS_DB_NAME:-shows_db}
+      POSTGRES_USER: ${SHOWS_DB_USER:-cinema}
+      POSTGRES_PASSWORD: ${SHOWS_DB_PASSWORD:-cinema}
+    ports:
+      # Esposto solo per poterci entrare con psql da fuori. Se sul portatile
+      # gira gia' un PostgreSQL sulla 5432 (quello installato al G2), basta
+      # SHOWS_DB_PORT=5433 docker compose up, senza toccare il file.
+      # In produzione questa riga si toglie: il database lo raggiunge solo
+      # chi sta sulla rete interna.
+      - "${SHOWS_DB_PORT:-5432}:5432"
+    volumes:
+      - shows_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # SENZA QUESTO, shows-service parte prima che PostgreSQL accetti
+      # connessioni, Flyway fallisce e il container muore. depends_on da solo
+      # aspetta che il container sia AVVIATO, non che il servizio dentro sia
+      # PRONTO.
+      test: ["CMD-SHELL", "pg_isready -U ${SHOWS_DB_USER:-cinema} -d ${SHOWS_DB_NAME:-shows_db}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  shows-service:
+    build: .
+    image: cinema/shows-service:1.0
+    container_name: shows-service
+    ports:
+      # La porta HOST e' configurabile: se la 8081 e' gia' occupata
+      # (tipicamente da un'istanza avviata dall'IDE) basta
+      # SHOWS_PORT=8181 docker compose up. La porta INTERNA resta 8081.
+      - "${SHOWS_PORT:-8081}:8081"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      # NON localhost: dentro la rete di compose "localhost" e' il container
+      # stesso. L'indirizzo del database e' IL NOME DEL SERVIZIO.
+      # E' l'errore numero uno al primo docker compose up, e il messaggio
+      # (Connection refused) non aiuta a capirlo.
+      SHOWS_DB_URL: jdbc:postgresql://shows-db:5432/${SHOWS_DB_NAME:-shows_db}
+      SHOWS_DB_USER: ${SHOWS_DB_USER:-cinema}
+      SHOWS_DB_PASSWORD: ${SHOWS_DB_PASSWORD:-cinema}
+    depends_on:
+      shows-db:
+        # non "avviato": SANO. E' l'healthcheck qui sopra a deciderlo.
+        condition: service_healthy
+    healthcheck:
+      # readiness, non liveness: qui la domanda e' "posso mandargli traffico?"
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:8081/actuator/health/readiness | grep -q UP"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+volumes:
+  shows_pgdata:

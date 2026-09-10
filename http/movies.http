@@ -380,7 +380,7 @@ Accept: application/json
 ###   catalogo gia' allineato: 7 film nel file, nessuno nuovo
 ### L'import e' idempotente, ed e' il requisito che rende sicuro farlo
 ### girare a ogni avvio.
-GET {{host}}/movies?size=50
+GET {{host}}/movies?size=2
 Accept: application/json
 
 

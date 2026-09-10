@@ -1,0 +1,19 @@
+# PASSO 5.2 — senza questo file il contesto di build spedisce al daemon
+# Docker anche target/ (centinaia di MB) e .git/ (tutta la storia del
+# progetto). Il risultato: build lente e cache che si invalida a ogni commit.
+target/
+.git/
+.gitattributes
+.gitignore
+.idea/
+.vscode/
+*.iml
+*.log
+.DS_Store
+.mvn/wrapper/maven-wrapper.jar
+README.md
+HELP.md
+http/
+docker-compose.yml
+.env
+.env.example

@@ -48,3 +48,47 @@ logging:
 # Resource: e' il motivo per cui il campo non e' una String.
 cinema:
   catalog-file: classpath:catalog.json
+
+# ===========================================================================
+# PASSO 5.4 — il profilo "docker", dopo il separatore ---
+#
+# Si attiva con SPRING_PROFILES_ACTIVE=docker (lo fa docker-compose.yml).
+# Qui dentro vanno SOLO i valori che cambiano dentro un container: tutto il
+# resto arriva gia' da variabili d'ambiente con default, scritte cosi' dal G2.
+# E' per questo che l'URL del database non e' ripetuto qui: SHOWS_DB_URL la
+# passa il compose, e il default su localhost resta valido sul portatile.
+# ===========================================================================
+---
+spring:
+  config:
+    activate:
+      on-profile: docker
+
+# Nel container il catalogo si puo' sostituire montando un file diverso,
+# senza ricostruire l'immagine:
+#     CINEMA_CATALOGFILE=file:/etc/cinema/catalog.json
+cinema:
+  catalog-file: ${CINEMA_CATALOGFILE:classpath:catalog.json}
+
+# Nel container il log SQL sta zitto: DEBUG serve in aula al passo 3.2,
+# non a un servizio che gira.
+logging:
+  level:
+    org.hibernate.SQL: ${SQL_LOG_LEVEL:INFO}
+
+# Liveness e readiness sono DUE DOMANDE DIVERSE:
+#   /actuator/health/liveness   "il processo e' vivo?"      se no, riavviami
+#   /actuator/health/readiness  "posso ricevere traffico?"  se no, non mandarmene
+# Un servizio che sta ancora applicando le migrazioni di Flyway e' vivo ma
+# NON pronto. Confonderle porta a due guasti opposti: riavviare in loop un
+# servizio sano, oppure mandare richieste a uno che non sa ancora rispondere.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always

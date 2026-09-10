@@ -50,7 +50,7 @@ GET {{host}}/nonesisto
 Accept: application/json
 
 ### Elimina uno spettacolo  ->  204, nessun corpo
-DELETE {{host}}/shows/2
+DELETE {{host}}/shows/3
 Accept: application/json
 
 ### crea un singolo spettacolo
@@ -92,7 +92,7 @@ Accept: application/json
 
 
 ### Query di dominio: spettacoli di un film fra due date (passo 3.5)
-GET {{host}}/shows/ricerca?movieId=1&da=2026-10-01T00:00:00&a=2026-10-31T23:59:59
+GET {{host}}/shows/ricerca?movieId=1&da=2026-10-01T00:00:00&a=2027-10-31T23:59:59
 Accept: application/json
 
 
@@ -222,3 +222,26 @@ POST {{host}}/shows/1/reserve
 ### 409 e non 400: la richiesta e' scritta bene, e' lo STATO dello
 ### spettacolo a renderla impossibile.
 POST {{host}}/shows/1/reserve?quantity=100000
+
+
+### =====================================================================
+###  G5 — le sonde di salute (passo 5.4)
+###  Ci sono solo col profilo "docker" attivo, cioe' dentro il container:
+###      docker compose up --build
+###  Sono le stesse due rotte che interroga l'healthcheck del compose.
+### =====================================================================
+
+### Il processo e' vivo?  ->  se no, riavviami
+GET {{host}}/actuator/health/liveness
+Accept: application/json
+
+
+### Posso ricevere traffico?  ->  se no, non mandarmi richieste
+### Un servizio che sta ancora applicando le migrazioni e' vivo ma NON pronto.
+GET {{host}}/actuator/health/readiness
+Accept: application/json
+
+
+### Lo stato completo, database compreso
+GET {{host}}/actuator/health
+Accept: application/json
