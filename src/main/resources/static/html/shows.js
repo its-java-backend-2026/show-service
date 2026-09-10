@@ -29,23 +29,39 @@ function mostraErrore(testo) {
 /**
  * Il corpo di una risposta di errore, come testo leggibile.
  *
- * Oggi le rotte rispondono in due formati diversi: il 404 e' una stringa secca
- * (@ExceptionHandler restituisce e.getMessage()), il 400 e' il JSON d'errore di
- * serie di Boot. Al G4, con ProblemDetail, diventeranno lo stesso formato e
- * questa funzione si semplifichera'.
+ * PASSO 4.6 — questa funzione si e' semplificata, come era stato previsto.
+ *
+ * Fino a ieri le rotte rispondevano in DUE formati: il 404 era una stringa
+ * secca (l'@ExceptionHandler restituiva e.getMessage()), il 400 era il JSON di
+ * serie di Boot con altri nomi di campo. Qui si tentava un JSON.parse e si
+ * provavano tre chiavi diverse sperando di indovinare.
+ *
+ * Ora ogni errore e' un ProblemDetail (RFC 7807), e i campi si sanno in
+ * anticipo: title dice la categoria, detail il fatto specifico.
+ *
+ * "errors" non fa parte dello standard: e' la proprieta' che GestoreErrori
+ * aggiunge quando a fallire e' @Valid, ed elenca campo per campo cosa non va.
+ * E' il caso piu' utile da mostrare in un form.
  */
 async function messaggioDiErrore(risposta) {
-  const testo = await risposta.text();
-  if (!testo) {
+  let problema;
+  try {
+    problema = await risposta.json();
+  } catch {
+    // Nessun corpo, o corpo non JSON: succede sui 500 generati dal container
+    // prima che l'applicazione veda la richiesta.
     return `HTTP ${risposta.status} ${risposta.statusText}`;
   }
-  try {
-    const json = JSON.parse(testo);
-    return `HTTP ${risposta.status} — ${json.message || json.detail || json.error || testo}`;
-  } catch {
-    // non era JSON: e' il messaggio in chiaro del nostro ExceptionHandler
-    return `HTTP ${risposta.status} — ${testo}`;
+
+  // Errori di validazione: si elencano i campi, che e' cio' che serve
+  // davvero a chi sta compilando il form.
+  if (problema.errors) {
+    const righe = Object.entries(problema.errors)
+        .map(([campo, messaggio]) => `• ${campo}: ${messaggio}`);
+    return `${problema.title}\n${righe.join('\n')}`;
   }
+
+  return `${problema.title} — ${problema.detail}`;
 }
 
 /* ------------------------------------------------------------------ *
@@ -73,15 +89,18 @@ function abilitaForm(form) {
         startTime += ':00';
       }
 
+      // PASSO 4.1 — il corpo ora e' un CreateShowRequest, non un'entita' Show.
+      // Il film si indica con movieId (un numero), non piu' con l'oggetto
+      // annidato movie: {id}. E' il DTO in ingresso che detta la forma.
       const corpo = {
-        // il film si indica per id, e deve esistere: la FK non perdona
-        movie: { id: Number(dati.get('movieId')) },
+        // il film deve esistere in catalogo: la FK non perdona
+        movieId: Number(dati.get('movieId')),
         startTime: startTime,
         basePrice: Number(dati.get('basePrice')),
         totalSeats: Number(dati.get('totalSeats'))
-        // id e availableSeats NON si inviano: non sono dati del client, sono
-        // conseguenze. L'id lo assegna il database, i posti disponibili li
-        // calcola il dominio a partire dai posti totali.
+        // id e availableSeats non si inviano perche' CreateShowRequest non li
+        // ha proprio: non sono dati del client, sono conseguenze. Fino a ieri
+        // arrivavano e il controller li buttava via a mano.
       };
 
       const risposta = await fetch(API, {
@@ -143,9 +162,10 @@ async function mostraDettaglio() {
     const show = await risposta.json();
 
     document.getElementById('d-id').textContent = show.id;
-    // il titolo puo' mancare: vedi la nota in fondo al file
+    // PASSO 4.1 — il film arriva appiattito in due campi: ShowResponse
+    // espone movieId e movieTitle invece dell'oggetto movie annidato.
     document.getElementById('d-film').textContent =
-        show.movie.title ? `${show.movie.title} (id ${show.movie.id})` : `id ${show.movie.id}`;
+        `${show.movieTitle} (id ${show.movieId})`;
     document.getElementById('d-inizio').textContent =
         new Date(show.startTime).toLocaleString('it-IT');
     document.getElementById('d-prezzo').textContent =
@@ -162,13 +182,14 @@ async function mostraDettaglio() {
 }
 
 /*
- * NOTA sul titolo del film che puo' mancare.
- * La risposta del POST rimanda indietro il film cosi' come e' arrivato dalla
- * richiesta ({id: 1, title: null}), perche' oggi il service salva lo Show senza
- * rileggere il film dal catalogo. Questa pagina non ne soffre, perche' fa una
- * GET /shows/{id} e quindi legge il dato vero dal database. Quando il service
- * risolvera' il film con MovieRepository, anche la risposta del POST sara'
- * completa e il ramo "titolo mancante" qui sopra si potra' togliere.
+ * NOTA — il titolo del film ora c'e' sempre, e il ramo "titolo mancante" che
+ * stava qui sopra e' stato tolto.
+ *
+ * Al G2 la risposta del POST rimandava indietro il film cosi' come era
+ * arrivato dalla richiesta ({id: 1, title: null}), perche' il service salvava
+ * lo Show senza rileggere il film dal catalogo. Ora il service risolve il film
+ * con MovieRepository e il mapper (passo 4.2) legge il titolo dall'entita'
+ * vera: anche la risposta del POST e' completa.
  */
 
 /* ------------------------------------------------------------------ *

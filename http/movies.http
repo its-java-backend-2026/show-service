@@ -200,20 +200,15 @@ Content-Type: application/json
 }
 
 
-### L'id nel corpo puo' esserci, ma deve coincidere con quello dell'URL
-### Qui coincide  ->  200
-PUT {{host}}/movies/3
-Content-Type: application/json
-
-{
-  "id": 3,
-  "title": "Perfect Days",
-  "durationMinutes": 124
-}
-
-
-### Id discordante fra corpo e URL  ->  400
-### senza dirglielo.
+### PASSO 4.1 — un id nel corpo ora viene IGNORATO, non piu' confrontato
+### Fino a ieri MovieController confrontava l'id del corpo con quello
+### dell'URL e rispondeva 400 se erano diversi. Ora MovieRequest non ha un
+### campo id, quindi Jackson scarta la chiave sconosciuta e la richiesta
+### passa: il film aggiornato e' il 3, quello dell'URL.
+###
+### Non e' una regressione, e' la stessa regola applicata prima: il
+### controllo esisteva per risolvere una contraddizione, e la
+### contraddizione non si puo' piu' nemmeno scrivere.
 PUT {{host}}/movies/3
 Content-Type: application/json
 
@@ -296,6 +291,97 @@ Accept: application/json
 ### era legittima e riprovare ha ottime probabilita' di riuscire.
 ### Lo stesso meccanismo, sugli spettacoli, e' quello che impedisce di
 ### vendere due volte l'ultima poltrona.
+
+
+### =====================  G4: VALIDAZIONE ED ERRORI  =====================
+
+### PASSO 4.5 — corpo vuoto  ->  400 con l'elenco dei campi mancanti
+###   "errors": {
+###     "title":           "Il titolo e' obbligatorio",
+###     "durationMinutes": "La durata e' obbligatoria"
+###   }
+POST {{host}}/movies
+Content-Type: application/json
+
+{}
+
+
+### Titolo di soli spazi  ->  400
+### @NotBlank e non @NotNull: "   " non e' null, ma non e' un titolo.
+POST {{host}}/movies
+Content-Type: application/json
+
+{
+  "title": "   ",
+  "durationMinutes": 100
+}
+
+
+### Durata a zero  ->  400 "La durata deve essere positiva"
+### Durata assente -> 400 "La durata e' obbligatoria" (provare a togliere
+### la riga): due errori diversi, due messaggi diversi, perche' il campo
+### del DTO e' Integer e non int.
+POST {{host}}/movies
+Content-Type: application/json
+
+{
+  "title": "Film a durata zero",
+  "durationMinutes": 0
+}
+
+
+### Titolo oltre i 200 caratteri  ->  400 (@Size sul DTO)
+### Prima lo intercettava una validazione a mano dentro MovieService,
+### confrontata con il VARCHAR(200) della migrazione V1.
+POST {{host}}/movies
+Content-Type: application/json
+
+{
+  "title": "Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua ut enim ad minim veniam quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat duis aute",
+  "durationMinutes": 100
+}
+
+
+### PASSO 4.6 — un film che non esiste  ->  404 in formato ProblemDetail
+### {
+###   "type":   "https://cinema.its.it/errori/film-non-trovato",
+###   "title":  "Film non trovato",
+###   "status": 404,
+###   "detail": "Film non trovato: 999999",
+###   "instance": "/movies/999999"
+### }
+### "type" e' l'identificatore stabile su cui il client puo' fare un if;
+### "detail" e' la frase per gli umani e puo' cambiare senza rompere niente.
+GET {{host}}/movies/999999
+Accept: application/json
+
+
+### Titolo duplicato  ->  409 con type "titolo-duplicato"
+POST {{host}}/movies
+Content-Type: application/json
+
+{
+  "title": "Oppenheimer",
+  "durationMinutes": 180
+}
+
+
+### Film in programmazione  ->  409 con type "film-in-programmazione"
+DELETE {{host}}/movies/1
+Accept: application/json
+
+
+### =====================  G4: CATALOGO DA FILE  =====================
+
+### PASSO 4.4 — i film di src/main/resources/catalog.json sono gia' qui
+### CatalogImporter li ha caricati all'avvio. Nei log della partenza:
+###   importati N film nuovi da catalog.json (M erano gia' in catalogo)
+### Riavviare il servizio e rileggere: la seconda volta dice
+###   catalogo gia' allineato: 7 film nel file, nessuno nuovo
+### L'import e' idempotente, ed e' il requisito che rende sicuro farlo
+### girare a ogni avvio.
+GET {{host}}/movies?size=50
+Accept: application/json
 
 
 ### =====================  DOCUMENTAZIONE  =====================

@@ -1,6 +1,5 @@
 package it.its.cinema.showsservice.domain;
 
-import com.fasterxml.jackson.annotation.JsonCreator;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -87,27 +86,19 @@ public class Show {
      * e' una conseguenza.
      */
     /**
-     * ATTENZIONE Boot 4 / Jackson 3 — questa riga sembra inutile e non lo e'.
+     * PASSO 4.1 — QUI C'ERA UN @JsonCreator(mode = DISABLED), E OGGI NON C'E' PIU'.
      *
-     * Jackson 3 promuove automaticamente un costruttore con argomenti a
-     * "creator" e da quel momento pretende TUTTI i suoi parametri. Un POST con
-     * {"movie": {"id": 3}} fallisce allora con 400:
-     *     JSON parse error: Cannot map `null` into type `int`
-     * perche' "minutes" non e' stato inviato. In Jackson 2 non succedeva:
-     * usava il costruttore vuoto piu' i setter.
+     * Serviva a impedire a Jackson 3 di promuovere questo costruttore a
+     * "creator" e pretendere tutti i suoi parametri a ogni POST. Ora Jackson
+     * non vede piu' questa classe: in ingresso c'e' CreateShowRequest, in
+     * uscita ShowResponse, e l'entita' non attraversa il confine HTTP.
      *
-     * Mode.DISABLED dice a Jackson di ignorare questo costruttore e tornare a
-     * @NoArgsConstructor + setter. Hibernate continua a usarlo normalmente.
-     *
-     * ATTENZIONE: perche' funzioni non ci deve essere NESSUN altro costruttore
-     * con argomenti. @AllArgsConstructor ne generava uno, non annotabile, che
-     * Jackson promuoveva al posto di questo: era il 400 su POST /shows (che
-     * non manda "id") e su PUT /shows/{id} (che manda solo due campi).
-     *
-     * E' anche una buona ragione per NON accettare entity in ingresso:
-     * al G4 arrivano i DTO e queste annotazioni spariscono dal dominio.
+     * Il costruttore resta com'e', e le sue validazioni pure. Non sono un
+     * doppione di quelle del DTO: il DTO difende il confine HTTP, questo
+     * difende l'oggetto da CHIUNQUE lo costruisca — un importatore, un test,
+     * un service futuro. Chi entra da una porta diversa da HTTP non incontra
+     * nessun @Valid.
      */
-    @JsonCreator(mode = JsonCreator.Mode.DISABLED)
     public Show(Long id, Movie movie, LocalDateTime startTime, BigDecimal basePrice, int totalSeats) {
         if (movie == null) {
             throw new IllegalArgumentException("Il film e' obbligatorio");

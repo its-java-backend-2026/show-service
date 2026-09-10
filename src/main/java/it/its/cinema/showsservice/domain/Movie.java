@@ -1,6 +1,5 @@
 package it.its.cinema.showsservice.domain;
 
-import com.fasterxml.jackson.annotation.JsonCreator;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -44,35 +43,32 @@ public class Movie {
     private Long version;
 
     /**
-     * ATTENZIONE Boot 4 / Jackson 3 — questa riga sembra inutile e non lo e'.
+     * PASSO 4.1 — QUI C'ERANO DUE @JsonCreator(mode = DISABLED), E OGGI NON CI SONO PIU'.
      *
-     * Jackson 3 promuove automaticamente un costruttore con argomenti a
-     * "creator" e da quel momento pretende TUTTI i suoi parametri. Un POST con
-     * {"movie": {"id": 3}} fallisce allora con 400:
+     * Servivano a difendersi da Jackson: in Boot 4 / Jackson 3 un costruttore
+     * con argomenti viene promosso automaticamente a "creator", e da quel
+     * momento Jackson pretende TUTTI i suoi parametri. Un POST che non mandava
+     * "minutes" falliva con 400:
      *     JSON parse error: Cannot map `null` into type `int`
-     * perche' "minutes" non e' stato inviato. In Jackson 2 non succedeva:
-     * usava il costruttore vuoto piu' i setter.
+     * Mode.DISABLED spegneva la promozione e riportava Jackson a
+     * @NoArgsConstructor + setter.
      *
-     * Mode.DISABLED dice a Jackson di ignorare questo costruttore e tornare a
-     * @NoArgsConstructor + setter. Hibernate continua a usarlo normalmente.
+     * Sono sparite perche' e' sparito il problema: Jackson non tocca piu'
+     * questa classe. In ingresso arriva MovieRequest, in uscita esce
+     * MovieResponse, e l'entita' non attraversa piu' il confine HTTP.
      *
-     * ATTENZIONE: basta UN solo costruttore con argomenti non disabilitato
-     * perche' Jackson lo promuova, e il 400 torni. Per questo il costruttore
-     * completo qui sotto e' scritto a mano e disabilitato anche lui, invece di
-     * arrivare da @AllArgsConstructor: un costruttore generato da Lombok non
-     * si puo' annotare.
-     *
-     * E' anche una buona ragione per NON accettare entity in ingresso:
-     * al G4 arrivano i DTO e queste annotazioni spariscono dal dominio.
+     * E' la ragione meno raccontata per cui esistono i DTO: senza, il dominio
+     * finisce per portarsi addosso le annotazioni di DUE librerie che non si
+     * parlano fra loro — JPA per il database, Jackson per il JSON — e ogni
+     * modifica deve accontentarle entrambe. I costruttori qui sotto ora
+     * rispondono solo a Hibernate e a chi scrive codice Java.
      */
-    @JsonCreator(mode = JsonCreator.Mode.DISABLED)
     public Movie(String title, int durationMinutes) {
         this.title = title;
         this.durationMinutes = durationMinutes;
     }
 
     /** Il completo: lo usano i dati di esempio e i test, che hanno anche l'id. */
-    @JsonCreator(mode = JsonCreator.Mode.DISABLED)
     public Movie(Long id, String title, int durationMinutes) {
         this.id = id;
         this.title = title;

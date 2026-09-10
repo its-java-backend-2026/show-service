@@ -30,16 +30,17 @@ Accept: application/json
 
 
 ### Uno spettacolo che non esiste  ->  404, non 500
-# "non l'ho trovato" e "mi sono rotto" sono due cose diverse:
-# e' il senso dell'@ExceptionHandler dentro ShowController
+# "non l'ho trovato" e "mi sono rotto" sono due cose diverse.
+# PASSO 4.6 — il corpo ora e' un ProblemDetail: type, title, status, detail.
+# Fino a ieri era una stringa secca.
 GET {{host}}/shows/999999
 Accept: application/json
 
 
 ### Un id che non e' un numero  ->  400
 # lo rifiuta Spring convertendo il @PathVariable, prima del nostro codice.
-# Il corpo e' il formato d'errore di serie di Boot: al G4, con ProblemDetail,
-# cambiera' aspetto. Vale la pena guardarlo adesso per confrontarlo dopo.
+# PASSO 4.6 — stesso formato del 404 qui sopra: era il punto dell'esercizio.
+# Prima erano due JSON diversi e il front-end doveva indovinare quale.
 GET {{host}}/shows/abc
 Accept: application/json
 
@@ -53,14 +54,16 @@ DELETE {{host}}/shows/2
 Accept: application/json
 
 ### crea un singolo spettacolo
+### PASSO 4.1 — il corpo e' cambiato: il film si indica con "movieId": 1,
+### non piu' con l'oggetto annidato "movie": {"id": 1}.
+### availableSeats non si manda piu': CreateShowRequest non ce l'ha.
 POST {{host}}/shows
 Content-Type: application/json
 
 {
-  "movie": {  "id": 1},
+  "movieId": 1,
   "startTime": "2027-01-01T21:30:00",
   "basePrice": 12.00,
-  "availableSeats": 100,
   "totalSeats": 100
 }
 
@@ -92,3 +95,130 @@ Accept: application/json
 GET {{host}}/shows/ricerca?movieId=1&da=2026-10-01T00:00:00&a=2026-10-31T23:59:59
 Accept: application/json
 
+
+### =====================================================================
+###  G4 — DTO, validazione, errori uniformi
+### =====================================================================
+
+### PASSO 4.5 — un POST senza niente dentro  ->  400 che dice QUALI campi
+### Nel corpo, accanto ai campi standard di ProblemDetail, c'e' "errors":
+###   "errors": {
+###     "movieId":    "Il film e' obbligatorio",
+###     "startTime":  "L'orario di inizio e' obbligatorio",
+###     "basePrice":  "Il prezzo base e' obbligatorio",
+###     "totalSeats": "I posti totali sono obbligatori"
+###   }
+### Il service non viene nemmeno chiamato: @Valid ferma la richiesta prima.
+POST {{host}}/shows
+Content-Type: application/json
+
+{}
+
+
+### Posti totali a zero  ->  400, e il messaggio parla di positivita'
+### Confrontarlo con quello di sopra: "obbligatori" contro "devono essere
+### positivi". Se totalSeats fosse un int primitivo invece che Integer, il
+### campo mancante arriverebbe come zero e i due casi darebbero lo STESSO
+### messaggio, quello sbagliato.
+POST {{host}}/shows
+Content-Type: application/json
+
+{
+  "movieId": 1,
+  "startTime": "2027-01-01T21:30:00",
+  "basePrice": 12.00,
+  "totalSeats": 0
+}
+
+
+### Uno spettacolo nel passato  ->  400 (@Future sul DTO)
+###   "errors": { "startTime": "L'orario di inizio deve essere nel futuro" }
+### ATTENZIONE: la data qui sotto e' nel passato al momento in cui e' stata
+### scritta. Se leggi questo file dopo il 2020 e' ancora valida; le date
+### "future" degli altri esempi invece scadono, e vanno spostate avanti
+### quando il 2027 sara' passato.
+POST {{host}}/shows
+Content-Type: application/json
+
+{
+  "movieId": 1,
+  "startTime": "2020-01-01T21:30:00",
+  "basePrice": 12.00,
+  "totalSeats": 100
+}
+
+
+### Lo stesso vincolo vale sulla PUT: non si sposta uno spettacolo indietro
+### Conseguenza: uno spettacolo GIA' PASSATO non si puo' piu' modificare,
+### nemmeno per correggerne il solo prezzo, perche' PUT vuole anche
+### startTime e quello rimandato indietro sarebbe passato.
+PUT {{host}}/shows/1
+Content-Type: application/json
+
+{
+  "startTime": "2020-01-01T22:45:00",
+  "basePrice": 18.60
+}
+
+
+### Prezzo negativo  ->  400 (@DecimalMin sul DTO)
+POST {{host}}/shows
+Content-Type: application/json
+
+{
+  "movieId": 1,
+  "startTime": "2027-01-01T21:30:00",
+  "basePrice": -5.00,
+  "totalSeats": 100
+}
+
+
+### PASSO 4.1 — id, version e availableSeats inviati dal client
+### NON danno errore: vengono ignorati, perche' il DTO non li ha.
+### Guardare la risposta: l'id non e' 999 e availableSeats non e' 3.
+POST {{host}}/shows
+Content-Type: application/json
+
+{
+  "id": 999,
+  "version": 42,
+  "availableSeats": 3,
+  "movieId": 1,
+  "startTime": "2027-02-01T21:30:00",
+  "basePrice": 12.00,
+  "totalSeats": 100
+}
+
+
+### Un film che non esiste  ->  404 con type "film-non-trovato"
+POST {{host}}/shows
+Content-Type: application/json
+
+{
+  "movieId": 999999,
+  "startTime": "2027-01-01T21:30:00",
+  "basePrice": 12.00,
+  "totalSeats": 100
+}
+
+
+### JSON malformato (manca una graffa)  ->  400, NON 500
+### Lo gestisce ResponseEntityExceptionHandler, la classe base di
+### GestoreErrori. Senza quell'extends finirebbe nel catch-all e il client
+### leggerebbe "errore interno" per un errore suo.
+POST {{host}}/shows
+Content-Type: application/json
+
+{
+  "movieId": 1,
+  "startTime": "2027-01-01T21:30:00"
+
+
+### Parametro obbligatorio mancante  ->  400, sempre dalla classe base
+POST {{host}}/shows/1/reserve
+
+
+### Posti insufficienti  ->  409 con type "posti-insufficienti"
+### 409 e non 400: la richiesta e' scritta bene, e' lo STATO dello
+### spettacolo a renderla impossibile.
+POST {{host}}/shows/1/reserve?quantity=100000

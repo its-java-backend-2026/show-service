@@ -92,8 +92,9 @@ Parti scritte per essere buttate via nelle tappe successive:
 - `InMemoryShowRepository` — **sparisce al G2**, sostituito da PostgreSQL. Al
   suo posto arrivano Spring Data JPA e le migrazioni Flyway, e con loro anche i
   dati di esempio.
-- Il formato degli errori — oggi il `404` restituisce una stringa. **Al G4**
-  diventa `ProblemDetail` (RFC 9457).
+- Il formato degli errori — al G1 il `404` restituiva una stringa. **Fatto al
+  G4**: ora ogni errore e' un `ProblemDetail` (RFC 7807), prodotto da
+  `GestoreErrori`.
 - `GET /shows` non è paginata — **lo diventa al G3**.
 
 Il service dipende da `ShowRepository`, l'interfaccia, non dalla sua
@@ -103,10 +104,9 @@ implementazione: è per questo che al G2 il service non cambia di una riga.
 
 Da sistemare nelle prossime tappe, elencati qui perché non siano una sorpresa:
 
-- Solo `ShowNotFoundException` viene tradotta in uno status HTTP.
-  `NotEnoughSeatsException` e `IllegalArgumentException` risalgono non gestite e
-  diventano **`500`**, mentre Swagger promette `409` e `400`. È esattamente il
-  problema che l'`@ExceptionHandler` globale del G4 risolve.
+- ~~Solo `ShowNotFoundException` viene tradotta in uno status HTTP.~~
+  **Risolto al G4**: `GestoreErrori` è un `@RestControllerAdvice` che copre
+  tutte le eccezioni di dominio, in un formato solo.
 - `POST /shows` salva lo `Show` deserializzato così com'è: `availableSeats` non
   viene ricalcolato da `totalSeats`, quindi uno spettacolo appena creato nasce
   con **0 posti disponibili** se il client non li invia.
@@ -116,6 +116,43 @@ Da sistemare nelle prossime tappe, elencati qui perché non siano una sorpresa:
 - I dati vivono in memoria: **a ogni riavvio si riparte dai tre spettacoli di
   esempio.**
 
+## G4 — DTO, validazione, errori uniformi
+
+Cosa è cambiato, e dove guardare:
+
+| Passo | Cosa | File |
+|---|---|---|
+| 4.1 | DTO come **record**, non entità, sul confine HTTP | `web/dto/` |
+| 4.2 | Mapper scritti a mano, niente MapStruct | `web/mapper/` |
+| 4.3 | Jackson 3: `tools.jackson`, non `com.fasterxml` | `catalog/CatalogImporter` |
+| 4.4 | Catalogo film importato da JSON all'avvio, **idempotente** | `catalog/CatalogImporter`, `resources/catalog.json` |
+| 4.5 | Bean Validation sui DTO, con `@Valid` sul controller | `web/dto/`, i due controller |
+| 4.6 | `@RestControllerAdvice` + `ProblemDetail` | `web/GestoreErrori` |
+| 4.7 | OpenAPI (già dal G1, springdoc **3.x**: la 2.x non parte su Boot 4) | `pom.xml` |
+| 4.8 | Test della fetta web con `@WebMvcTest` | `ShowControllerTest` |
+
+**Il contratto HTTP è cambiato in modo incompatibile.** Chi ha script del G3:
+
+- `POST /shows` vuole `"movieId": 1`, non più `"movie": {"id": 1}`;
+- la risposta di uno spettacolo espone `movieId` e `movieTitle` appiattiti,
+  non più l'oggetto `movie` annidato;
+- `id`, `version` e `availableSeats` inviati dal client non danno errore:
+  vengono ignorati, perché i DTO in ingresso non li hanno;
+- `PUT /movies/{id}` non rifiuta più con `400` un `id` discordante nel corpo,
+  per la stessa ragione;
+- ogni errore è un `ProblemDetail`, non più una stringa secca.
+
+Il catalogo si carica da `src/main/resources/catalog.json`, e il percorso si
+cambia senza toccare il codice:
+
+```bash
+CINEMA_CATALOGFILE=file:/percorso/catalog.json ./mvnw spring-boot:run
+```
+
+L'import gira a **ogni** avvio e non duplica niente: al secondo avvio i log
+dicono `catalogo gia' allineato`.
+
 ## Stack
 
-Spring Boot 4.1.1 · Java 21 · springdoc-openapi 3.1.0 · Lombok · Maven
+Spring Boot 4.1.1 · Java 21 · springdoc-openapi 3.1.0 · Jackson 3 · Bean Validation ·
+Lombok · Maven

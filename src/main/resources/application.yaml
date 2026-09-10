@@ -35,3 +35,16 @@ springdoc:
 logging:
   level:
     org.hibernate.SQL: DEBUG
+
+# PASSO 4.4 — da dove si legge il catalogo dei film all'avvio.
+#
+# Il default e' gia' nel codice (@Value con "classpath:catalog.json"), quindi
+# questa riga non e' obbligatoria: sta qui perche' una configurazione visibile
+# si trova, una nascosta in un @Value si scopre per caso.
+#
+# In un container diventa "file:/etc/cinema/catalog.json", oppure si
+# sovrascrive senza toccare niente con la variabile d'ambiente
+# CINEMA_CATALOGFILE. Il prefisso (classpath:, file:, http:) lo interpreta
+# Resource: e' il motivo per cui il campo non e' una String.
+cinema:
+  catalog-file: classpath:catalog.json
