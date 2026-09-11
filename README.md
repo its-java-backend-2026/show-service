@@ -85,6 +85,7 @@ direttamente su `ShowController`.
 | `DELETE` | `/shows/{id}` | Elimina — `204`, nessun corpo |
 | `POST` | `/shows/{id}/reserve?quantity=N` | Riserva N posti. Non idempotente |
 | `POST` | `/shows/{id}/release?quantity=N` | Rilascia N posti, mai oltre i posti totali |
+| `POST` | `/movies/importa-da-fornitore` | Importa il catalogo di un fornitore esterno (Feign) — `503` se il fornitore non risponde |
 
 Le rotte di servizio (`/actuator/**`) non sono in questa tabella perché non
 fanno parte dell'API: sono spiegate in
@@ -100,12 +101,17 @@ pronte, casi d'errore compresi. Si esegue con:
 
 ```
 src/main/java/it/its/cinema/showsservice/
-├── web/         ShowController          parla HTTP, e solo HTTP
-├── service/     ShowService             le regole del caso d'uso
-├── repository/  ShowRepository          l'interfaccia
-│                InMemoryShowRepository  l'unica implementazione di oggi
-├── domain/      Show, Movie             le regole di dominio + le eccezioni
-└── config/      OpenApiConfig           l'intestazione della Swagger UI
+├── web/         ShowController, MovieController   parlano HTTP, e solo HTTP
+│   ├── dto/     record in ingresso e in uscita    il contratto pubblico (G4)
+│   ├── mapper/  ShowMapper, MovieMapper           entita' <-> DTO, a mano
+│   └──           GestoreErrori                     ogni errore, un ProblemDetail
+├── service/     ShowService, MovieService         le regole del caso d'uso
+├── repository/  ShowRepository, MovieRepository   Spring Data JPA (G2)
+├── domain/      Show, Movie + le eccezioni        le regole di dominio
+├── catalog/     CatalogImporter                   il catalogo da file, all'avvio
+│                RemoteCatalogImporter             il catalogo dal fornitore (G6)
+├── client/      CatalogClient, MovieJson          cio' che chiamiamo fuori (G6)
+└── config/      OpenApiConfig                     l'intestazione della Swagger UI
 ```
 
 Due regole che il codice rispetta e che vale la pena notare:
@@ -363,7 +369,124 @@ Il compose oggi sta **dentro** questo repository (`build: .`), così chi clona
 la cartella ha tutto. Al **G6**, quando accanto a `shows-service` nasceranno
 gli altri servizi, salirà di un livello e lo stesso file li orchestrerà tutti.
 
+## G6 (anticipato) — OpenFeign: chiamare un servizio che non e' nostro
+
+Il passo **6.8b** di `PASSI.txt`, portato avanti al G5 perche' è la prima volta
+che questo servizio dipende da qualcun altro — e tutto il Blocco B parte da
+lì. `shows-service` scarica il catalogo film da un **fornitore esterno** e
+importa solo i titoli che non ha.
+
+| Cosa | File |
+|---|---|
+| il client dichiarativo | `client/CatalogClient` |
+| la copia locale del contratto remoto | `client/MovieJson` |
+| chiamata, import e traduzione degli errori | `catalog/RemoteCatalogImporter` |
+| `503` invece di `500` | `web/GestoreErrori`, `domain/CatalogProviderUnavailableException` |
+| il finto fornitore (nginx) | `docker-compose.yml`, `fornitore/catalog.json` |
+| il test, senza rete | `RemoteCatalogImporterTest` |
+
+### Feign in tre righe
+
+```java
+@FeignClient(name = "catalog-provider", url = "${cinema.catalog.remote-url}")
+public interface CatalogClient {
+    @GetMapping(value = "/catalog.json", produces = "application/json")
+    List<MovieJson> scaricaCatalogo();
+}
+```
+
+Nessuna implementazione: Feign genera il proxy a runtime. Si dichiara **cosa**
+si chiama, non **come** — è la differenza con `RestClient` (passo 6.6), che nel
+corso useremo fra i nostri servizi. Tre cose da non sbagliare:
+
+- **`@EnableFeignClients`** sulla classe main. Senza, le interfacce non vengono
+  scansionate e l'avvio muore con `No qualifying bean of type 'CatalogClient'`,
+  che non nomina Feign da nessuna parte.
+- **`url` e non solo `name`**: `url` è un indirizzo fisso dalla
+  configurazione. Senza `url`, Feign tratterebbe `name` come nome logico da
+  risolvere con un service discovery (Eureka), che qui non c'è.
+- **il release train**: `spring-cloud-dependencies` **2025.1.3** è la riga del
+  `pom.xml` che decide tutto. Ogni train è allineato a una versione di Boot;
+  con quello sbagliato il contesto non parte.
+
+### I timeout non sono tuning
+
+```yaml
+spring.cloud.openfeign.client.config.default:
+  connectTimeout: 2000
+  readTimeout: 5000
+```
+
+Il default di Feign è generoso (60s in lettura). Un fornitore **lento** tiene
+occupati i nostri thread per un minuto a richiesta e ci trascina giù con sé: fa
+più danni di un fornitore **spento**, che almeno risponde subito "connessione
+rifiutata". È la stessa lezione del passo 6.6, e al G7 diventerà un circuit
+breaker.
+
+### Il guasto di qualcun altro non è un nostro 500
+
+Feign lancia eccezioni *unchecked* — `FeignException` per una risposta di
+errore, `RetryableException` (che la estende) per timeout e connessione
+rifiutata. Se risalgono fino al controller, il catch-all di `GestoreErrori` le
+racconta al client come `500`: "colpa nostra, un bug". `RemoteCatalogImporter`
+le traduce in un'eccezione di dominio, e l'advice la trasforma in **`503` con
+`Retry-After: 30`**.
+
+Verificato: con `docker compose stop catalog-provider`,
+`POST /movies/importa-da-fornitore` risponde
+
+```json
+{ "type": "https://cinema.its.it/errori/fornitore-non-disponibile",
+  "title": "Fornitore non disponibile", "status": 503 }
+```
+
+e nel frattempo `GET /movies` continua a rispondere `200`, con il container
+ancora `healthy`. **Una dipendenza esterna giù non ci porta giù**: è il motivo
+per cui il database sta nella health e il fornitore no.
+
+### Il finto fornitore
+
+Una lezione su come si chiama un servizio remoto ha bisogno di un servizio
+remoto, e dipendere da un'API su internet in aula significa dipendere dal wifi.
+Nel compose c'è un `nginx:alpine` che serve `./fornitore/catalog.json`:
+
+```
+http://catalog-provider/catalog.json     dentro la rete di compose
+http://localhost:8090/catalog.json       dal portatile, per provare dall'IDE
+```
+
+Il file è montato da un volume: si modifica e la chiamata successiva vede i
+film nuovi, senza ricostruire nessuna immagine. Contiene 9 film, di cui 3 già
+nostri e uno **scritto due volte di proposito** — un fornitore esterno non
+garantisce nessuna unicità, e senza il controllo dei titoli già visti il
+secondo `"Anora"` violerebbe `uk_movies_title` e farebbe fallire tutto
+l'import. Esito atteso della prima chiamata:
+
+```json
+{ "importati": 5, "giaPresenti": 4, "totaleDalFornitore": 9 }
+```
+
+della seconda: `"importati": 0`. Le richieste pronte sono in fondo a
+[`http/movies.http`](http/movies.http).
+
+### Due importatori, di proposito
+
+`CatalogImporter` (passo 4.4) **non è stato toccato**: legge un file e gira una
+volta all'avvio. Il catalogo remoto ha il suo, `RemoteCatalogImporter`, che
+chiama un servizio e gira quando lo chiede un umano.
+
+Le due classi si somigliano nella parte di fusione, e la somiglianza è un costo
+accettato con gli occhi aperti. Un importatore condiviso avrebbe legato il
+codice del G4 — che funziona, è spiegato e sta in un commit — alle esigenze di
+una sorgente che si comporta in modo diverso: un file c'è o non c'è, un servizio
+va in timeout, risponde `500`, o manda dati sporchi (il doppione `"Anora"`). Il
+giorno che una delle due sorgenti cambia regola, l'altra non se ne accorge.
+
+Ognuno mappa il proprio contratto sul dominio: `FilmDelCatalogo` per il file,
+`MovieJson` per il fornitore.
+
 ## Stack
 
 Spring Boot 4.1.1 · Java 21 · PostgreSQL 17 · Flyway · springdoc-openapi 3.1.0 ·
-Jackson 3 · Bean Validation · Lombok · Maven · Docker + Compose v2
+Jackson 3 · Bean Validation · Lombok · Maven · Docker + Compose v2 ·
+Spring Cloud OpenFeign 5.0.3 (train 2025.1.3)

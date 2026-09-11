@@ -8,8 +8,11 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import it.its.cinema.showsservice.catalog.EsitoImport;
+import it.its.cinema.showsservice.catalog.RemoteCatalogImporter;
 import it.its.cinema.showsservice.domain.Movie;
 import it.its.cinema.showsservice.service.MovieService;
+import it.its.cinema.showsservice.web.dto.ImportResponse;
 import it.its.cinema.showsservice.web.dto.MovieRequest;
 import it.its.cinema.showsservice.web.dto.MovieResponse;
 import it.its.cinema.showsservice.web.mapper.MovieMapper;
@@ -45,6 +48,9 @@ public class MovieController {
 
     private final MovieService service;
     private final MovieMapper mapper;
+
+    /** PASSO 6.8b — il catalogo del fornitore esterno, via Feign. */
+    private final RemoteCatalogImporter catalogoRemoto;
 
     /**
      * GET /movies-> tutto il catalogo
@@ -188,5 +194,38 @@ public class MovieController {
             @PathVariable Long id) {
         service.deleteById(id);
         return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * PASSO 6.8b — POST /movies/importa-da-fornitore
+     *
+     * Scarica il catalogo di un fornitore esterno con Feign e importa i film
+     * che non abbiamo. E' l'unica rotta del progetto che, per rispondere,
+     * chiama un ALTRO servizio: da qui in poi (G6) sara' la normalita'.
+     *
+     * POST e non GET: la chiamata cambia lo stato del nostro catalogo. Non e'
+     * idempotente nel senso di HTTP — la seconda volta importa zero film, non
+     * perche' la rotta sia idempotente ma perche' lo e' la regola di fusione,
+     * che e' una garanzia piu' forte e ce la siamo scritta noi.
+     *
+     * Chi risponde 503: GestoreErrori, quando il fornitore non c'e'.
+     */
+    @Operation(summary = "Importa il catalogo da un fornitore esterno",
+            description = "Scarica il catalogo remoto (client Feign) e inserisce "
+                    + "solo i film non ancora presenti. Rieseguirlo non duplica "
+                    + "niente: la seconda chiamata importa zero film.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Import eseguito, anche con zero film nuovi",
+                    content = @Content(mediaType = "application/json",
+                            schema = @Schema(implementation = ImportResponse.class))),
+            @ApiResponse(responseCode = "503", description = "Il fornitore non ha risposto: non e' un errore nostro",
+                    content = @Content(mediaType = "application/problem+json",
+                            schema = @Schema(implementation = ProblemDetail.class)))
+    })
+    @PostMapping("/importa-da-fornitore")
+    public ImportResponse importaDaFornitore() {
+        EsitoImport esito = catalogoRemoto.importaDalFornitore();
+        return new ImportResponse(esito.importati(), esito.giaPresenti(),
+                esito.totaleNellaSorgente());
     }
 }

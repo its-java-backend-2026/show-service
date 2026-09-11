@@ -28,6 +28,24 @@ spring:
     enabled: true
     locations: classpath:db/migration
 
+  # PASSO 6.8b — I TIMEOUT DI FEIGN. Non sono un dettaglio di tuning.
+  #
+  # Il default e' generoso (60s di lettura): un fornitore LENTO tiene occupati
+  # i nostri thread per un minuto a richiesta e ci trascina giu' con lui. Un
+  # servizio lento fa piu' danni di un servizio spento, perche' spento risponde
+  # subito "connessione rifiutata" e noi ce ne liberiamo.
+  #
+  # "default" e' il profilo che vale per tutti i client; al posto di default si
+  # scrive il "name" di un @FeignClient per configurarne uno solo.
+  cloud:
+    openfeign:
+      client:
+        config:
+          default:
+            connectTimeout: 2000     # aprire la connessione
+            readTimeout: 5000        # aspettare la risposta
+            loggerLevel: basic       # metodo, URL, stato, durata
+
 springdoc:
   swagger-ui:
     path: /swagger-ui.html
@@ -35,6 +53,11 @@ springdoc:
 logging:
   level:
     org.hibernate.SQL: DEBUG
+    # PASSO 6.8b — loggerLevel: basic non basta: Feign scrive sul logger
+    # dell'INTERFACCIA, e a livello DEBUG. Con questa riga a INFO non vedi
+    # niente, ed e' il default giusto.
+    #     FEIGN_LOG_LEVEL=DEBUG ./mvnw spring-boot:run
+    it.its.cinema.showsservice.client: ${FEIGN_LOG_LEVEL:INFO}
 
 # PASSO 4.4 — da dove si legge il catalogo dei film all'avvio.
 #
@@ -48,6 +71,15 @@ logging:
 # Resource: e' il motivo per cui il campo non e' una String.
 cinema:
   catalog-file: classpath:catalog.json
+
+  # PASSO 6.8b — dove abita il fornitore del catalogo.
+  #
+  # Il default e' il finto fornitore di docker-compose visto DA FUORI
+  # (nginx pubblicato sulla 8090), cosi' l'import remoto si prova anche
+  # avviando l'applicazione dall'IDE. Dentro il container l'indirizzo cambia,
+  # e a passarlo e' il compose: CINEMA_CATALOG_REMOTE_URL=http://catalog-provider
+  catalog:
+    remote-url: ${CINEMA_CATALOG_REMOTE_URL:http://localhost:8090}
 
 # ===========================================================================
 # PASSO 5.4 — il profilo "docker", dopo il separatore ---
@@ -75,6 +107,7 @@ cinema:
 logging:
   level:
     org.hibernate.SQL: ${SQL_LOG_LEVEL:INFO}
+    it.its.cinema.showsservice.client: ${FEIGN_LOG_LEVEL:INFO}
 
 # Liveness e readiness sono DUE DOMANDE DIVERSE:
 #   /actuator/health/liveness   "il processo e' vivo?"      se no, riavviami

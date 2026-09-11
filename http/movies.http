@@ -388,3 +388,43 @@ Accept: application/json
 
 ### Swagger UI (aprilo nel browser, non da qui)
 ### http://localhost:8081/swagger-ui.html
+
+### =====================================================================
+###  ANTICIPAZIONE G6 — passo 6.8b: OpenFeign
+###
+###  Scarica il catalogo da un fornitore ESTERNO e importa i film nuovi.
+###  Il fornitore e' il container "catalog-provider" (nginx) che serve
+###  ./fornitore/catalog.json, quindi serve il compose avviato:
+###      docker compose up --build -d
+### =====================================================================
+
+### Il fornitore, visto da fuori: e' un JSON statico e nient'altro
+GET http://localhost:8090/catalog.json
+Accept: application/json
+
+
+### Import dal fornitore  ->  200
+### Prima chiamata:  {"importati":5,"giaPresenti":4,"totaleDalFornitore":9}
+###   9 film nel catalogo remoto, 3 li avevamo gia', 1 e' un doppione
+###   INTERNO del fornitore ("Anora" c'e' due volte), 5 sono nuovi.
+POST {{host}}/movies/importa-da-fornitore
+Accept: application/json
+
+
+### La stessa chiamata, di nuovo  ->  200, {"importati":0,...}
+### L'idempotenza non e' della rotta, e' della regola di fusione in
+### RemoteCatalogImporter: un umano che clicca due volte non duplica nulla.
+POST {{host}}/movies/importa-da-fornitore
+Accept: application/json
+
+
+### IL CASO CHE CONTA: fornitore spento  ->  503, NON 500
+###
+###     docker compose stop catalog-provider
+###
+### Risposta: ProblemDetail con type "fornitore-non-disponibile" e header
+### Retry-After: 30. E nel frattempo GET /movies continua a rispondere 200:
+### una dipendenza esterna giu' non ci porta giu'.
+### Per riaccenderlo:  docker compose start catalog-provider
+POST {{host}}/movies/importa-da-fornitore
+Accept: application/json

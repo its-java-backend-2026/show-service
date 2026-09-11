@@ -29,7 +29,27 @@
 	<properties>
 		<java.version>21</java.version>
 		<springdoc.version>3.1.0</springdoc.version>
+		<!-- giorno 6, passo 6.8b — il "release train" di Spring Cloud.
+		     Non e' una versione qualsiasi: ogni train e' allineato a una
+		     versione di Spring Boot. Il 2025.1.x va con Boot 4.x; con un
+		     train piu' vecchio il contesto non parte nemmeno. -->
+		<spring-cloud.version>2025.1.3</spring-cloud.version>
 	</properties>
+	<!-- giorno 6, passo 6.8b — il BOM di Spring Cloud governa le versioni
+	     di tutto cio' che sta sotto org.springframework.cloud: per questo
+	     la dipendenza di openfeign qui sotto non ha <version>. -->
+	<dependencyManagement>
+		<dependencies>
+			<dependency>
+				<groupId>org.springframework.cloud</groupId>
+				<artifactId>spring-cloud-dependencies</artifactId>
+				<version>${spring-cloud.version}</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+		</dependencies>
+	</dependencyManagement>
+
 	<dependencies>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
@@ -64,6 +84,13 @@
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-actuator</artifactId>
+		</dependency>
+		<!-- giorno 6, passo 6.8b — OpenFeign: il client HTTP DICHIARATIVO.
+		     Si dichiara COSA si chiama (un'interfaccia annotata), non COME.
+		     La versione la decide il BOM di Spring Cloud qui sopra. -->
+		<dependency>
+			<groupId>org.springframework.cloud</groupId>
+			<artifactId>spring-cloud-starter-openfeign</artifactId>
 		</dependency>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>

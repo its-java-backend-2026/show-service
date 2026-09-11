@@ -44,6 +44,34 @@ services:
         limits:
           memory: 512M
 
+  # PASSO 6.8b — IL FINTO FORNITORE ESTERNO.
+  #
+  # Un nginx che serve un file JSON statico, e nient'altro: e' l'interlocutore
+  # del client Feign. Serve perche' una lezione su come si chiama un servizio
+  # remoto ha bisogno di un servizio remoto — e dipendere da un'API su internet
+  # in aula significa dipendere dal wifi dell'istituto.
+  #
+  # Il catalogo sta in ./fornitore, montato in sola lettura: si modifica il
+  # file e la chiamata successiva vede i film nuovi, senza ricostruire niente.
+  catalog-provider:
+    image: nginx:alpine
+    container_name: catalog-provider
+    ports:
+      # Pubblicata solo per poter provare il client dall'IDE, fuori da Docker.
+      - "${CATALOG_PROVIDER_PORT:-8090}:80"
+    volumes:
+      - ./fornitore:/usr/share/nginx/html:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost/catalog.json > /dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+
   shows-service:
     build: .
     image: cinema/shows-service:1.0
@@ -62,9 +90,20 @@ services:
       SHOWS_DB_URL: jdbc:postgresql://shows-db:5432/${SHOWS_DB_NAME:-shows_db}
       SHOWS_DB_USER: ${SHOWS_DB_USER:-cinema}
       SHOWS_DB_PASSWORD: ${SHOWS_DB_PASSWORD:-cinema}
+      # PASSO 6.8b — anche il fornitore si chiama per NOME DEL SERVIZIO, non
+      # localhost. E in HTTP senza porta vuol dire :80, che e' quella di nginx.
+      CINEMA_CATALOG_REMOTE_URL: http://catalog-provider
+      SQL_LOG_LEVEL: ${SQL_LOG_LEVEL:-INFO}
+      FEIGN_LOG_LEVEL: ${FEIGN_LOG_LEVEL:-INFO}
     depends_on:
       shows-db:
         # non "avviato": SANO. E' l'healthcheck qui sopra a deciderlo.
+        condition: service_healthy
+      catalog-provider:
+        # Il servizio parte comunque se il fornitore non c'e' (una dipendenza
+        # esterna giu' non deve impedirci di servire il catalogo che abbiamo
+        # gia'): questa condizione serve solo a rendere prevedibile la
+        # dimostrazione in aula.
         condition: service_healthy
     healthcheck:
       # readiness, non liveness: qui la domanda e' "posso mandargli traffico?"

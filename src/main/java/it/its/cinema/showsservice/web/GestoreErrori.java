@@ -1,5 +1,6 @@
 package it.its.cinema.showsservice.web;
 
+import it.its.cinema.showsservice.domain.CatalogProviderUnavailableException;
 import it.its.cinema.showsservice.domain.MovieInUseException;
 import it.its.cinema.showsservice.domain.MovieNotFoundException;
 import it.its.cinema.showsservice.domain.MovieTitleAlreadyExistsException;
@@ -112,6 +113,34 @@ public class GestoreErrori extends ResponseEntityExceptionHandler {
                 "modifica-concorrente",
                 "Qualcun altro ha modificato la risorsa mentre completavi "
                         + "l'operazione. Rileggila e riprova.");
+    }
+
+    // ---------------------------------------------------------------- 503
+
+    /**
+     * PASSO 6.8b — IL FORNITORE ESTERNO NON HA RISPOSTO.
+     *
+     * 503 e non 500, ed e' la distinzione che vale il passo: il nostro codice
+     * ha funzionato, e' un servizio a valle che non c'era. 500 significa
+     * "colpa nostra, un bug": manda in caccia la persona sbagliata e dice al
+     * client che riprovare e' inutile.
+     *
+     * Con Retry-After diciamo anche QUANDO riprovare, e un client educato
+     * (o un Resilience4j al G7) lo rispetta invece di martellare un servizio
+     * che e' gia' in difficolta'.
+     */
+    @ExceptionHandler(CatalogProviderUnavailableException.class)
+    public ResponseEntity<ProblemDetail> fornitoreNonDisponibile(
+            CatalogProviderUnavailableException e) {
+
+        ProblemDetail corpo = problema(HttpStatus.SERVICE_UNAVAILABLE,
+                "Fornitore non disponibile",
+                "fornitore-non-disponibile",
+                e.getMessage());
+
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header(HttpHeaders.RETRY_AFTER, "30")
+                .body(corpo);
     }
 
     // ---------------------------------------------------------------- 400
