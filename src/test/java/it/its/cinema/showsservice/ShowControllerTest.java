@@ -213,18 +213,67 @@ class ShowControllerTest {
     @Test
     @DisplayName("Posti insufficienti e' un 409, non un 500")
     void postiInsufficienti() throws Exception {
-        when(service.reserveSeats(7L, 500))
+        when(service.reserveSeats(7L, 500, "saga-1"))
                 .thenThrow(new NotEnoughSeatsException(7L, 500, 120));
 
-        mockMvc.perform(post("/shows/7/reserve").param("quantity", "500"))
+        mockMvc.perform(post("/shows/7/reserve")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"sagaId":"saga-1","quantity":500}
+                                """))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.title").value("Posti insufficienti"))
                 .andExpect(jsonPath("$.type").value("https://cinema.its.it/errori/posti-insufficienti"));
     }
 
+    /**
+     * PASSO 6.4 — il sagaId arriva fino al service.
+     *
+     * Il test non verifica un comportamento visibile in HTTP: verifica che il
+     * controller non lo perda per strada. E' l'unico punto in cui si puo'
+     * controllare, perche' da li' in poi il sagaId finisce solo in un log.
+     */
     @Test
-    @DisplayName("Un parametro obbligatorio mancante e' un 400 gestito da Spring, non il nostro 500")
-    void parametroMancante() throws Exception {
+    @DisplayName("reserve passa al service quantita' E sagaId")
+    void reservePassaIlSagaId() throws Exception {
+        Show show = new Show(7L, new Movie(1L, "Dune - Parte Due", 166),
+                LocalDateTime.of(2027, 1, 15, 21, 0), new BigDecimal("9.50"), 120);
+        when(service.reserveSeats(eq(7L), anyInt(), any())).thenReturn(show);
+
+        mockMvc.perform(post("/shows/7/reserve")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"sagaId":"3f2a1b9c-6d4e-4a7b-9c2f-1e8d0a5b7c31","quantity":2}
+                                """))
+                .andExpect(status().isOk());
+
+        verify(service).reserveSeats(7L, 2, "3f2a1b9c-6d4e-4a7b-9c2f-1e8d0a5b7c31");
+    }
+
+    /**
+     * PASSO 6.4 — un sagaId vuoto e' un 400, e il service non viene sfiorato.
+     *
+     * E' il @NotBlank di SeatsRequest a fermarlo: senza @Valid sul parametro
+     * del controller la validazione non scatterebbe e la stringa vuota
+     * arriverebbe nei log come identificativo di correlazione inutile.
+     */
+    @Test
+    @DisplayName("Un sagaId vuoto e' un 400 e non arriva al service")
+    void sagaIdVuoto() throws Exception {
+        mockMvc.perform(post("/shows/7/reserve")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"sagaId":"   ","quantity":2}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors.sagaId").exists());
+
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    @DisplayName("Il corpo mancante e' un 400 gestito da Spring, non il nostro 500")
+    void corpoMancante() throws Exception {
         // Senza "extends ResponseEntityExceptionHandler" in GestoreErrori,
         // questa richiesta finirebbe nel catch-all @ExceptionHandler(Exception)
         // e il client leggerebbe 500 per un errore suo.

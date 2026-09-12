@@ -14,6 +14,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import it.its.cinema.showsservice.domain.Show;
 import it.its.cinema.showsservice.service.ShowService;
 import it.its.cinema.showsservice.web.dto.CreateShowRequest;
+import it.its.cinema.showsservice.web.dto.SeatsRequest;
 import it.its.cinema.showsservice.web.dto.ShowResponse;
 import it.its.cinema.showsservice.web.dto.UpdateShowRequest;
 import it.its.cinema.showsservice.web.mapper.ShowMapper;
@@ -222,14 +223,27 @@ public class ShowController {
      * POST e non PUT: non si sta sostituendo una risorsa, si sta chiedendo di
      * ESEGUIRE un'operazione. E non e' idempotente — chiamarla due volte
      * riserva quattro posti, non due.
+     *
+     * PASSO 6.4 — I DUE PASSI DELLA SAGA, VISTI DA QUESTA PARTE.
+     *
+     * Questa rotta e la sua compensazione (/release) sono cio' che
+     * booking-service chiamera' dal passo 6.10. Da oggi i parametri arrivano
+     * in un corpo JSON (SeatsRequest) e non piu' nella query string, perche'
+     * insieme alla quantita' viaggia il sagaId.
+     *
+     * shows-service NON sa che esiste una saga, e non deve saperlo: riceve un
+     * identificativo opaco, lo scrive nei log e lo dimentica. Il coordinamento
+     * e' un problema di chi coordina.
      */
     @Operation(summary = "Riserva dei posti",
-            description = "Scala i posti richiesti dalla disponibilita'.")
+            description = "Scala i posti richiesti dalla disponibilita'. "
+                    + "Primo passo della saga di prenotazione (G6): la chiama "
+                    + "booking-service, che genera e trasmette il sagaId.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Posti riservati",
                     content = @Content(mediaType = "application/json",
                             schema = @Schema(implementation = ShowResponse.class))),
-            @ApiResponse(responseCode = "400", description = "Quantita' non valida",
+            @ApiResponse(responseCode = "400", description = "Corpo mancante, sagaId vuoto o quantita' non valida",
                     content = @Content(mediaType = "application/problem+json",
                             schema = @Schema(implementation = ProblemDetail.class))),
             @ApiResponse(responseCode = "404", description = "Spettacolo non trovato",
@@ -243,19 +257,25 @@ public class ShowController {
     public ShowResponse prenota(
             @Parameter(description = "Identificativo dello spettacolo", example = "1")
             @PathVariable Long id,
-            @Parameter(description = "Quanti posti riservare", example = "2")
-            @RequestParam int quantity) {
-        return mapper.toResponse(service.reserveSeats(id, quantity));
+            @Valid @RequestBody SeatsRequest richiesta) {
+        return mapper.toResponse(
+                service.reserveSeats(id, richiesta.quantity(), richiesta.sagaId()));
     }
 
+    /**
+     * La COMPENSAZIONE di /reserve: non un "annulla", che nei sistemi
+     * distribuiti non esiste, ma un'operazione nuova che rimette a posto.
+     * Dal G8 e' quello che parte quando il pagamento viene rifiutato.
+     */
     @Operation(summary = "Rilascia dei posti",
             description = "Restituisce i posti al pubblico. Non si supera mai il "
-                    + "numero di posti totali, nemmeno chiamandola due volte.")
+                    + "numero di posti totali, nemmeno chiamandola due volte. "
+                    + "E' la compensazione di /reserve, e porta lo stesso sagaId.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Posti rilasciati",
                     content = @Content(mediaType = "application/json",
                             schema = @Schema(implementation = ShowResponse.class))),
-            @ApiResponse(responseCode = "400", description = "Quantita' non valida",
+            @ApiResponse(responseCode = "400", description = "Corpo mancante, sagaId vuoto o quantita' non valida",
                     content = @Content(mediaType = "application/problem+json",
                             schema = @Schema(implementation = ProblemDetail.class))),
             @ApiResponse(responseCode = "404", description = "Spettacolo non trovato",
@@ -266,8 +286,8 @@ public class ShowController {
     public ShowResponse rilascia(
             @Parameter(description = "Identificativo dello spettacolo", example = "1")
             @PathVariable Long id,
-            @Parameter(description = "Quanti posti rilasciare", example = "2")
-            @RequestParam int quantity) {
-        return mapper.toResponse(service.releaseSeats(id, quantity));
+            @Valid @RequestBody SeatsRequest richiesta) {
+        return mapper.toResponse(
+                service.releaseSeats(id, richiesta.quantity(), richiesta.sagaId()));
     }
 }

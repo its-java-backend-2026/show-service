@@ -77,14 +77,32 @@ Content-Type: application/json
   "basePrice": 18.60
 }
 
-### Riserva 2 posti
+### Riserva 2 posti (passo 6.4)
 ### POST e non PUT: non si sostituisce una risorsa, si chiede un'operazione.
 ### Non e' idempotente: chiamarla due volte riserva quattro posti.
-POST {{host}}/shows/1/reserve?quantity=2
+###
+### Dal G6 i parametri stanno nel CORPO e non piu' nella query string, perche'
+### insieme alla quantita' viaggia il sagaId. Normalmente lo genera
+### booking-service; qui lo scriviamo a mano per provare la rotta da sola.
+POST {{host}}/shows/1/reserve
+Content-Type: application/json
+
+{
+  "sagaId": "3f2a1b9c-6d4e-4a7b-9c2f-1e8d0a5b7c31",
+  "quantity": 2
+}
 
 
-### Rilascia 2 posti
-POST {{host}}/shows/1/release?quantity=2
+### Rilascia 2 posti — la COMPENSAZIONE, con lo STESSO sagaId (passo 6.4)
+### Cercare quella stringa nei log mostra andata e ritorno dello stesso
+### acquisto. Dal G8 e' quello che parte quando il pagamento viene rifiutato.
+POST {{host}}/shows/1/release
+Content-Type: application/json
+
+{
+  "sagaId": "3f2a1b9c-6d4e-4a7b-9c2f-1e8d0a5b7c31",
+  "quantity": 2
+}
 
 ### Elenco paginato (passo 3.4)
 GET {{host}}/shows?page=3&size=5&sort=startTime,desc
@@ -214,14 +232,32 @@ Content-Type: application/json
   "startTime": "2027-01-01T21:30:00"
 
 
-### Parametro obbligatorio mancante  ->  400, sempre dalla classe base
+### Corpo obbligatorio mancante  ->  400, sempre dalla classe base
 POST {{host}}/shows/1/reserve
+
+
+### sagaId vuoto  ->  400 con "errors": { "sagaId": ... }   (passo 6.4)
+### Lo ferma @NotBlank su SeatsRequest: un identificativo di correlazione
+### fatto di spazi e' inutile quanto un null.
+POST {{host}}/shows/1/reserve
+Content-Type: application/json
+
+{
+  "sagaId": "   ",
+  "quantity": 2
+}
 
 
 ### Posti insufficienti  ->  409 con type "posti-insufficienti"
 ### 409 e non 400: la richiesta e' scritta bene, e' lo STATO dello
 ### spettacolo a renderla impossibile.
-POST {{host}}/shows/1/reserve?quantity=100000
+POST {{host}}/shows/1/reserve
+Content-Type: application/json
+
+{
+  "sagaId": "3f2a1b9c-6d4e-4a7b-9c2f-1e8d0a5b7c31",
+  "quantity": 100000
+}
 
 
 ### =====================================================================

@@ -7,9 +7,17 @@
 # Nota: "version:" in cima non si scrive piu' da Compose v2, e' obsoleto.
 #
 # Qui il file sta DENTRO il repository del servizio (build: .), cosi' chi
-# clona la cartella ha tutto e il "solo comando" funziona davvero. Al G6,
-# quando accanto a shows-service nasceranno gli altri servizi, questo file
-# salira' di un livello e i build: diventeranno ./shows-service, ./bookings...
+# clona la cartella ha tutto e il "solo comando" funziona davvero.
+#
+# G6 — E CI RESTA. Accanto a shows-service sono nati pricing-service (8082) e
+# booking-service (8083), ognuno nel SUO repository. Un compose che facesse
+# "build: ../pricing-service" renderebbe questo repository incostruibile per
+# chi non ha anche gli altri accanto, e avrebbe rimesso l'accoppiamento che
+# repository separati servono a togliere.
+#
+# Il sistema completo (tre servizi, due database, il fornitore) lo monta il
+# repository di orchestrazione, ../cinema-deploy: e' li' il docker-compose.yml
+# del passo 6.11. Questo file resta per lavorare su shows-service da solo.
 
 services:
 

@@ -83,8 +83,8 @@ direttamente su `ShowController`.
 | `POST` | `/shows` | Crea uno spettacolo — `201` con header `Location` |
 | `PUT` | `/shows/{id}` | Aggiorna **orario e prezzo** (film e posti totali non si toccano) |
 | `DELETE` | `/shows/{id}` | Elimina — `204`, nessun corpo |
-| `POST` | `/shows/{id}/reserve?quantity=N` | Riserva N posti. Non idempotente |
-| `POST` | `/shows/{id}/release?quantity=N` | Rilascia N posti, mai oltre i posti totali |
+| `POST` | `/shows/{id}/reserve` | Riserva N posti. Corpo: `{ "sagaId": "...", "quantity": N }`. Non idempotente |
+| `POST` | `/shows/{id}/release` | Rilascia N posti, mai oltre i posti totali. Stesso corpo |
 | `POST` | `/movies/importa-da-fornitore` | Importa il catalogo di un fornitore esterno (Feign) — `503` se il fornitore non risponde |
 
 Le rotte di servizio (`/actuator/**`) non sono in questa tabella perché non
@@ -409,6 +409,55 @@ corso useremo fra i nostri servizi. Tre cose da non sbagliare:
   `pom.xml` che decide tutto. Ogni train è allineato a una versione di Boot;
   con quello sbagliato il contesto non parte.
 
+### Una nota onesta: Feign è in maintenance mode
+
+**Spring Cloud OpenFeign non riceve funzionalità nuove dal 2022** (train
+2022.0): solo correzioni di bug e patch di sicurezza. Funziona, è supportato,
+la base installata è enorme — lo incontrerete di sicuro nel codice esistente,
+ed è per questo che sta in questo corso. Ma su un progetto **nuovo**, oggi,
+non è più la scelta predefinita.
+
+Il motivo per cui si sceglieva Feign era lo stile dichiarativo, e quello stile
+adesso ce l'ha Spring core: si chiamano **HTTP Interfaces**, e in Spring
+Framework 7 — cioè in questo stesso progetto, senza aggiungere niente — la
+stessa interfaccia si scrive così:
+
+```java
+@HttpExchange(url = "/catalog.json", accept = "application/json")
+public interface CatalogClient {
+    @GetExchange
+    List<MovieJson> scaricaCatalogo();
+}
+```
+
+e si registra con una riga, al posto di `@EnableFeignClients`:
+
+```java
+@ImportHttpServices(group = "catalogo", types = CatalogClient.class)
+```
+
+Cosa si guadagna: sparisce **tutto** `spring-cloud-dependencies` dal `pom.xml`
+— niente BOM, niente release train da tenere allineato a Boot, che è la terza
+delle tre trappole qui sopra. Sotto il proxy c'è un `RestClient` normale,
+quindi i timeout si configurano dove li mette il passo 6.6.
+
+Verificabile senza fidarsi:
+
+```bash
+unzip -l ~/.m2/repository/org/springframework/spring-web/7.0.9/spring-web-7.0.9.jar \
+  | grep -E "HttpExchange|HttpServiceProxyFactory|ImportHttpServices"
+```
+
+**Perché allora il codice qui sotto usa ancora Feign?** Perché il passo 6.8b lo
+prescrive, e perché vedere Feign una volta ha valore pratico: è quello che
+troverete nei progetti che vi capiteranno fra le mani. La regola da portarsi a
+casa non è «usate Feign», è:
+
+> Lo stile dichiarativo conviene quando le rotte remote sono **molte e
+> stabili** e gli errori si trattano **tutti allo stesso modo**. Oggi quello
+> stile si ottiene con le HTTP Interfaces di Spring; Feign lo si tiene dove
+> c'è già.
+
 ### I timeout non sono tuning
 
 ```yaml
@@ -484,6 +533,59 @@ giorno che una delle due sorgenti cambia regola, l'altra non se ne accorge.
 
 Ognuno mappa il proprio contratto sul dominio: `FilmDelCatalogo` per il file,
 `MovieJson` per il fornitore.
+
+## G6 — `reserve` e `release` diventano passi di una saga
+
+Dal G6 `shows-service` non è più solo: accanto nascono `pricing-service` (8082)
+e `booking-service` (8083), ognuno nel suo repository. Il sistema completo lo
+monta `cinema-deploy`.
+
+Qui cambia una cosa sola, ed è il **passo 6.4**: i parametri di `reserve` e
+`release` passano dalla query string a un **corpo JSON**.
+
+```diff
+- POST /shows/1/reserve?quantity=2
++ POST /shows/1/reserve
++ Content-Type: application/json
++
++ { "sagaId": "3f2a1b9c-6d4e-4a7b-9c2f-1e8d0a5b7c31", "quantity": 2 }
+```
+
+### Perché un corpo, e non un parametro in più
+
+Insieme alla quantità deve viaggiare il **`sagaId`**, e un identificativo di
+correlazione appiccicato alla query string è la strada più breve per vederlo
+finire nei log di accesso di ogni proxy che la richiesta attraversa.
+
+### Cos'è il `sagaId`, oggi che la saga ancora non c'è
+
+È l'identificativo dell'**intera operazione di acquisto**: lo genera
+`booking-service` una volta sola e lo ripete identico a ogni passo, verso ogni
+servizio.
+
+Oggi serve a leggere i log. Tre processi, tre flussi di log, e una stringa
+comune per ricucire la storia di *un* acquisto:
+
+```bash
+docker compose logs | grep 3f2a1b9c-
+```
+
+Dal G8 diventerà di più: la chiave con cui riconoscere che un `release` è la
+compensazione di **quel** `reserve`, e la chiave dell'idempotenza — la stessa
+saga che ritenta non deve scalare i posti due volte.
+
+Si chiede **già oggi**, anche se oggi lo scriviamo solo nel log: aggiungerlo al
+contratto dopo significherebbe cambiarlo mentre due servizi lo stanno già
+usando.
+
+### `shows-service` non sa che esiste una saga
+
+Ed è il punto. Riceve un identificativo opaco, lo scrive nei log e lo dimentica:
+nessuna logica di coordinamento, nessuna conoscenza di chi lo sta chiamando. Il
+coordinamento è un problema di chi coordina.
+
+È la stessa ragione per cui `/release` esiste già ma nessuno la chiama: è la
+compensazione di `/reserve`, e chi decide *quando* compensare sta altrove.
 
 ## Stack
 

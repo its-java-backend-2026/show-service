@@ -110,7 +110,10 @@ class ShowRepositoryIT {
     private boolean prenotaUnPostoConRetry(Long showId, AtomicInteger conflitti) {
         for (int tentativo = 1; tentativo <= TENTATIVI; tentativo++) {
             try {
-                service.reserveSeats(showId, 1);
+                // passo 6.4: il sagaId e' parte della firma. Qui non c'e'
+                // nessuna saga, ma il tentativo ha comunque un'identita': e'
+                // quella che nei log distingue i 200 thread di questo test.
+                service.reserveSeats(showId, 1, "test-concorrenza-" + tentativo);
                 return true;
             } catch (NotEnoughSeatsException postiFiniti) {
                 // esito legittimo, non un conflitto: non si riprova

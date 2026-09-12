@@ -196,14 +196,22 @@ public class ShowService {
      * farlo (la regola sta nel dominio) e poi si occupa di rendere persistente
      * il risultato, che e' l'unica cosa che il dominio non sa fare.
      *
-     * Dal G8 questo metodo diventa il primo passo della saga di prenotazione.
+     * PASSO 6.4 — ORA E' UN PASSO DI UNA SAGA, E LO DICE LA FIRMA.
+     *
+     * Il sagaId non cambia una virgola del calcolo: serve a rendere leggibile
+     * cio' che succede su TRE processi diversi. Senza, nei log di shows-service
+     * si legge "riservati 2 posti sullo spettacolo 1" e non c'e' modo di
+     * capire a quale acquisto appartenga fra i cento in corso.
+     *
+     * Dal G8 questo metodo diventa il primo passo della saga di prenotazione,
+     * e il sagaId diventa la chiave dell'idempotenza.
      */
     @Transactional
-    public Show reserveSeats(Long id, int quantita) {
+    public Show reserveSeats(Long id, int quantita, String sagaId) {
         Show show = findById(id);
         show.reserveSeats(quantita);
-        log.info("riservati {} posti sullo spettacolo {}, ne restano {}",
-                quantita, id, show.getAvailableSeats());
+        log.info("[saga {}] riservati {} posti sullo spettacolo {}, ne restano {}",
+                sagaId, quantita, id, show.getAvailableSeats());
         return repository.save(show);
     }
 
@@ -214,13 +222,17 @@ public class ShowService {
      * perche' il tetto dei posti totali e' una regola di dominio.
      * Dal G8 diventa la COMPENSAZIONE del primo passo della saga: quando il
      * pagamento viene rifiutato, i posti devono tornare disponibili.
+     *
+     * PASSO 6.4 — il sagaId e' quello del reserve che si sta compensando:
+     * e' la stringa che, cercata nei log, mostra l'andata e il ritorno
+     * dello stesso acquisto.
      */
     @Transactional
-    public Show releaseSeats(Long id, int quantita) {
+    public Show releaseSeats(Long id, int quantita, String sagaId) {
         Show show = findById(id);
         show.releaseSeats(quantita);
-        log.info("rilasciati {} posti sullo spettacolo {}, ora ne ha {}",
-                quantita, id, show.getAvailableSeats());
+        log.info("[saga {}] rilasciati {} posti sullo spettacolo {}, ora ne ha {}",
+                sagaId, quantita, id, show.getAvailableSeats());
         return repository.save(show);
     }
 }
