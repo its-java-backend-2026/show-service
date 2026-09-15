@@ -83,7 +83,7 @@ direttamente su `ShowController`.
 | `POST` | `/shows` | Crea uno spettacolo — `201` con header `Location` |
 | `PUT` | `/shows/{id}` | Aggiorna **orario e prezzo** (film e posti totali non si toccano) |
 | `DELETE` | `/shows/{id}` | Elimina — `204`, nessun corpo |
-| `POST` | `/shows/{id}/reserve` | Riserva N posti. Corpo: `{ "sagaId": "...", "quantity": N }`. Non idempotente |
+| `POST` | `/shows/{id}/reserve` | Riserva N posti. Corpo: `{ "sagaId": "...", "quantity": N }`. **Idempotente sul `sagaId`** (G8) |
 | `POST` | `/shows/{id}/release` | Rilascia N posti, mai oltre i posti totali. Stesso corpo |
 | `POST` | `/movies/importa-da-fornitore` | Importa il catalogo di un fornitore esterno (Feign) — `503` se il fornitore non risponde |
 
@@ -570,9 +570,10 @@ comune per ricucire la storia di *un* acquisto:
 docker compose logs | grep 3f2a1b9c-
 ```
 
-Dal G8 diventerà di più: la chiave con cui riconoscere che un `release` è la
-compensazione di **quel** `reserve`, e la chiave dell'idempotenza — la stessa
-saga che ritenta non deve scalare i posti due volte.
+Dal G8 è diventato di più: la chiave con cui riconoscere che un `release` è la
+compensazione di **quel** `reserve`, e la chiave dell'**idempotenza** — la
+stessa saga che ritenta non scala i posti due volte. Vedi la sezione G8 qui
+sotto.
 
 Si chiede **già oggi**, anche se oggi lo scriviamo solo nel log: aggiungerlo al
 contratto dopo significherebbe cambiarlo mentre due servizi lo stanno già
@@ -584,8 +585,89 @@ Ed è il punto. Riceve un identificativo opaco, lo scrive nei log e lo dimentica
 nessuna logica di coordinamento, nessuna conoscenza di chi lo sta chiamando. Il
 coordinamento è un problema di chi coordina.
 
-È la stessa ragione per cui `/release` esiste già ma nessuno la chiama: è la
-compensazione di `/reserve`, e chi decide *quando* compensare sta altrove.
+È la stessa ragione per cui `/release` è esistita per due giornate senza che
+nessuno la chiamasse: è la compensazione di `/reserve`, e chi decide *quando*
+compensare sta altrove. Dal G8 la chiama `BookingSaga`.
+
+---
+
+## G8 — `reserve` e `release` diventano idempotenti (passo 8.3)
+
+Fino al G7 ripetere una riserva scalava i posti una seconda volta. Non era un
+difetto nascosto: era scritto nei commenti di `booking-service`, ed era il
+motivo per cui `POST /shows/{id}/reserve` era l'unica chiamata **senza
+`@Retry`**.
+
+Il problema è il timeout. *Timeout* non vuol dire «non è arrivata», vuol dire
+**«non so se è arrivata»** — e il più delle volte la richiesta era arrivata
+benissimo, era la risposta a essersi persa.
+
+### La tabella, ed è tutto qui
+
+```sql
+CREATE TABLE show_operations (
+    saga_id        VARCHAR(64) NOT NULL,
+    operation_type VARCHAR(20) NOT NULL,      -- RESERVE | RELEASE
+    show_id        BIGINT      NOT NULL,
+    quantity       INTEGER     NOT NULL,
+    ...
+    CONSTRAINT uk_show_operations_saga_tipo UNIQUE (saga_id, operation_type)
+);
+```
+
+**Il tipo sta nella chiave**, e non è un dettaglio: la stessa saga passa di qui
+**due volte** quando compensa. Con il solo `saga_id` nel vincolo, il rilascio
+verrebbe scambiato per una riserva ripetuta e non verrebbe eseguito mai — i
+posti resterebbero bloccati per sempre, che è esattamente il guasto che la saga
+esiste per evitare.
+
+Il vincolo `UNIQUE` è la protezione **vera**. Il controllo in Java
+(`existsBySagaIdAndOperationType`) copre il caso normale — un retry a distanza
+di secondi — senza far scrivere niente al database; due chiamate simultanee lo
+superano entrambe, e a decidere è il vincolo, che è l'unico posto condiviso da
+tutte le istanze del servizio.
+
+### Due scritture, una transazione (passo 8.6)
+
+Disponibilità e riga dell'operazione si scrivono **insieme**, e per questo
+stanno in `PostiSaga`, un bean a parte:
+
+- se passasse solo la disponibilità, la richiesta ritentata scalerebbe di nuovo
+  — non troverebbe nessuna operazione registrata;
+- se passasse solo l'operazione, i posti non tornerebbero mai indietro.
+
+È in una classe separata perché `@Transactional` funziona **solo attraverso il
+proxy di Spring**: un metodo privato di `ShowService` non aprirebbe nessuna
+transazione, in silenzio. È lo stesso avvertimento che questo servizio porta in
+cima a `ShowService` dal G3.
+
+### La prova
+
+```bash
+curl -s localhost:8081/shows/1 | grep -o '"availableSeats":[0-9]*'
+
+for i in 1 2; do
+  curl -s -o /dev/null -X POST localhost:8081/shows/1/reserve \
+       -H 'Content-Type: application/json' \
+       -d '{"sagaId":"prova-idempotenza","quantity":2}'
+done
+
+# due posti in meno, non quattro
+curl -s localhost:8081/shows/1 | grep -o '"availableSeats":[0-9]*'
+```
+
+`IdempotenzaSagaIT` lo verifica con PostgreSQL vero, compreso il caso che si
+nota di meno: *«rilascia 2 posti» eseguito due volte ne rilascia 2, non 4*.
+Dei posti in regalo non fanno arrabbiare nessuno subito — si scopre la sera
+della proiezione, con due persone sulla stessa fila.
+
+### Cosa NON è cambiato
+
+`shows-service` continua a non sapere che esiste una saga. Riceve un
+identificativo opaco, lo usa come chiave di idempotenza e lo dimentica: non
+conosce i passi, non conosce l'ordine, non sa che esistono un pagamento e dei
+punti fedeltà. Un partecipante deve solo saper fare — e **rifare senza danni**
+— la sua parte.
 
 ## Stack
 

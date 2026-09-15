@@ -8,8 +8,11 @@ import it.its.cinema.showsservice.domain.Movie;
 import it.its.cinema.showsservice.domain.MovieNotFoundException;
 import it.its.cinema.showsservice.domain.Show;
 import it.its.cinema.showsservice.domain.ShowNotFoundException;
+import it.its.cinema.showsservice.domain.TipoOperazione;
 import it.its.cinema.showsservice.repository.MovieRepository;
+import it.its.cinema.showsservice.repository.ShowOperationRepository;
 import it.its.cinema.showsservice.repository.ShowRepository;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -59,6 +62,12 @@ public class ShowService {
 
     private final ShowRepository repository;
     private final MovieRepository movieRepository;
+
+    /** PASSO 8.3 — "questa saga l'ho gia' vista?". */
+    private final ShowOperationRepository operazioni;
+
+    /** PASSO 8.6 — le due scritture che devono andare insieme. */
+    private final PostiSaga postiSaga;
 
     @Transactional(readOnly = true)
     public Page<Show> findAll(Pageable pageable) {
@@ -196,43 +205,109 @@ public class ShowService {
      * farlo (la regola sta nel dominio) e poi si occupa di rendere persistente
      * il risultato, che e' l'unica cosa che il dominio non sa fare.
      *
-     * PASSO 6.4 — ORA E' UN PASSO DI UNA SAGA, E LO DICE LA FIRMA.
+     * PASSO 6.4 — E' UN PASSO DI UNA SAGA, E LO DICE LA FIRMA.
      *
      * Il sagaId non cambia una virgola del calcolo: serve a rendere leggibile
-     * cio' che succede su TRE processi diversi. Senza, nei log di shows-service
-     * si legge "riservati 2 posti sullo spettacolo 1" e non c'e' modo di
-     * capire a quale acquisto appartenga fra i cento in corso.
+     * cio' che succede su piu' processi diversi. Senza, nei log di
+     * shows-service si legge "riservati 2 posti sullo spettacolo 1" e non c'e'
+     * modo di capire a quale acquisto appartenga fra i cento in corso.
      *
-     * Dal G8 questo metodo diventa il primo passo della saga di prenotazione,
-     * e il sagaId diventa la chiave dell'idempotenza.
+     * =======================================================================
+     * PASSO 8.3 — E DAL G8 IL sagaId E' ANCHE LA CHIAVE DELL'IDEMPOTENZA.
+     *
+     * Era la promessa lasciata scritta al G6 e al G7, ed e' il debito che
+     * questo metodo ripaga oggi. Fino a ieri, ritentare una riserva dopo un
+     * timeout scalava i posti una seconda volta: per questo, in
+     * booking-service, era l'unica chiamata senza @Retry.
+     *
+     * Ora la seconda chiamata con lo stesso sagaId NON FA NIENTE e risponde
+     * come la prima. Il che permette a chi ci chiama di ritentare in
+     * sicurezza — ed e' esattamente cio' che serve, perche' "timeout" non
+     * vuol dire "non e' arrivata": vuol dire "non so se e' arrivata".
+     *
+     * NIENTE @Transactional QUI SOPRA, E NON E' UNA DIMENTICANZA: la
+     * transazione sta in PostiSaga, perche' la violazione del vincolo UNIQUE
+     * dev'essere trattata come una risposta e non come un errore. Il perche'
+     * per esteso e' nel commento di quella classe.
+     * =======================================================================
      */
-    @Transactional
     public Show reserveSeats(Long id, int quantita, String sagaId) {
-        Show show = findById(id);
-        show.reserveSeats(quantita);
-        log.info("[saga {}] riservati {} posti sullo spettacolo {}, ne restano {}",
-                sagaId, quantita, id, show.getAvailableSeats());
-        return repository.save(show);
+
+        // --- l'ho gia' fatta? il caso normale: un retry dopo un timeout ---
+        if (operazioni.existsBySagaIdAndOperationType(sagaId, TipoOperazione.RESERVE)) {
+            log.info("[saga {}] riserva gia' eseguita sullo spettacolo {}: non scalo niente",
+                    sagaId, id);
+            return perId(id);
+        }
+
+        try {
+            Show show = postiSaga.riserva(id, quantita, sagaId);
+            log.info("[saga {}] riservati {} posti sullo spettacolo {}, ne restano {}",
+                    sagaId, quantita, id, show.getAvailableSeats());
+            return show;
+
+        } catch (DataIntegrityViolationException e) {
+            // La corsa persa: due chiamate con lo stesso sagaId sono arrivate
+            // insieme e hanno superato entrambe il controllo qui sopra. Il
+            // vincolo ne ha fatta passare una, e la NOSTRA transazione e'
+            // stata annullata tutta — posti compresi. Non c'e' nessun doppio
+            // scalo da disfare: si rilegge e si risponde come l'altra.
+            log.warn("[saga {}] corsa persa sulla riserva dello spettacolo {}: "
+                    + "ha vinto un'altra chiamata, rileggo", sagaId, id);
+            return perId(id);
+        }
     }
 
     /**
      * Restituisce dei posti al pubblico.
      *
-     * Come riservaPosti, il service non fa il calcolo: lo chiede allo Show,
+     * Come reserveSeats, il service non fa il calcolo: lo chiede allo Show,
      * perche' il tetto dei posti totali e' una regola di dominio.
-     * Dal G8 diventa la COMPENSAZIONE del primo passo della saga: quando il
+     * Dal G8 e' la COMPENSAZIONE del primo passo della saga: quando il
      * pagamento viene rifiutato, i posti devono tornare disponibili.
      *
      * PASSO 6.4 — il sagaId e' quello del reserve che si sta compensando:
-     * e' la stringa che, cercata nei log, mostra l'andata e il ritorno
-     * dello stesso acquisto.
+     * e' la stringa che, cercata nei log, mostra l'andata e il ritorno dello
+     * stesso acquisto.
+     *
+     * =======================================================================
+     * PASSO 8.3 — "RILASCIA 2 POSTI" ESEGUITO DUE VOLTE NE RILASCIA 2, NON 4.
+     *
+     * E' la frase del passo 8.3, e qui va letta due volte perche' e' il caso
+     * in cui il danno si nota MENO: dei posti in regalo non fanno arrabbiare
+     * nessuno subito, e la sera della proiezione si scopre che due file sono
+     * state vendute a quattro persone.
+     *
+     * Il Math.min dentro Show.releaseSeats non bastava: impedisce di superare
+     * il totale, ma non impedisce di rimettere due volte dei posti che erano
+     * stati tolti una volta sola. A distinguere i due casi e' solo la riga in
+     * show_operations.
+     *
+     * E c'e' un secondo caso, che il vincolo sulla COPPIA rende possibile:
+     * una compensazione che arriva senza che la riserva sia mai avvenuta. Qui
+     * non e' un problema — il rilascio viene eseguito e i posti tornano al
+     * massimo al totale — ma vale la pena notare che il tipo nella chiave e'
+     * cio' che permette alla stessa saga di riservare E rilasciare.
+     * =======================================================================
      */
-    @Transactional
     public Show releaseSeats(Long id, int quantita, String sagaId) {
-        Show show = findById(id);
-        show.releaseSeats(quantita);
-        log.info("[saga {}] rilasciati {} posti sullo spettacolo {}, ora ne ha {}",
-                sagaId, quantita, id, show.getAvailableSeats());
-        return repository.save(show);
+
+        if (operazioni.existsBySagaIdAndOperationType(sagaId, TipoOperazione.RELEASE)) {
+            log.info("[saga {}] rilascio gia' eseguito sullo spettacolo {}: non rimetto niente",
+                    sagaId, id);
+            return perId(id);
+        }
+
+        try {
+            Show show = postiSaga.rilascia(id, quantita, sagaId);
+            log.info("[saga {}] rilasciati {} posti sullo spettacolo {}, ora ne ha {}",
+                    sagaId, quantita, id, show.getAvailableSeats());
+            return show;
+
+        } catch (DataIntegrityViolationException e) {
+            log.warn("[saga {}] corsa persa sul rilascio dello spettacolo {}: "
+                    + "ha vinto un'altra chiamata, rileggo", sagaId, id);
+            return perId(id);
+        }
     }
 }

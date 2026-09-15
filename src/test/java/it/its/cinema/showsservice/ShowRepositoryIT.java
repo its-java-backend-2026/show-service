@@ -105,15 +105,32 @@ class ShowRepositoryIT {
      * sta al confine dell'applicazione — Spring Retry con @Retryable, o un
      * ciclo nel service — e mai nel dominio, che non sa niente di transazioni.
      *
+     * =======================================================================
+     * PASSO 8.3 — E DAL G8 IL sagaId QUI SOPRA NON E' PIU' UNA DECORAZIONE.
+     *
+     * Fino al G7 serviva solo a rendere leggibili i log, e infatti questo
+     * test lo componeva col NUMERO DEL TENTATIVO: otto clienti diversi al
+     * primo giro mandavano tutti "test-concorrenza-1". Andava bene finche'
+     * shows-service lo scriveva e lo dimenticava.
+     *
+     * Da oggi quella stringa e' una CHIAVE DI IDEMPOTENZA: otto clienti con
+     * lo stesso sagaId sono, per shows-service, lo stesso acquisto ripetuto
+     * otto volte — e verrebbe eseguito una volta sola, vendendo un posto
+     * invece di quattro. Il test fallirebbe, e avrebbe ragione.
+     *
+     * Ogni cliente ha quindi il SUO sagaId, che e' cio' che succede davvero:
+     * booking-service ne genera uno nuovo per ogni tentativo di acquisto
+     * (passo 6.4). Il numero del tentativo invece NON entra nella chiave, ed
+     * e' voluto: un retry dopo un conflitto e' lo STESSO acquisto, e deve
+     * portare la stessa identita'.
+     * =======================================================================
+     *
      * @return true se il posto e' stato venduto, false se erano finiti
      */
-    private boolean prenotaUnPostoConRetry(Long showId, AtomicInteger conflitti) {
+    private boolean prenotaUnPostoConRetry(Long showId, String sagaId, AtomicInteger conflitti) {
         for (int tentativo = 1; tentativo <= TENTATIVI; tentativo++) {
             try {
-                // passo 6.4: il sagaId e' parte della firma. Qui non c'e'
-                // nessuna saga, ma il tentativo ha comunque un'identita': e'
-                // quella che nei log distingue i 200 thread di questo test.
-                service.reserveSeats(showId, 1, "test-concorrenza-" + tentativo);
+                service.reserveSeats(showId, 1, sagaId);
                 return true;
             } catch (NotEnoughSeatsException postiFiniti) {
                 // esito legittimo, non un conflitto: non si riprova
@@ -155,10 +172,13 @@ class ShowRepositoryIT {
         AtomicReference<Throwable> inatteso = new AtomicReference<>();
 
         for (int i = 0; i < CLIENTI; i++) {
+            // Un sagaId per cliente: sono otto acquisti diversi, non uno
+            // ripetuto otto volte. Vedi il commento su prenotaUnPostoConRetry.
+            String sagaId = "test-concorrenza-cliente-" + i + "-" + System.nanoTime();
             pool.submit(() -> {
                 try {
                     via.await();                       // partono tutti insieme
-                    if (prenotaUnPostoConRetry(showId, conflitti)) {
+                    if (prenotaUnPostoConRetry(showId, sagaId, conflitti)) {
                         riusciti.incrementAndGet();
                     } else {
                         respinti.incrementAndGet();
