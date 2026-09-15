@@ -669,8 +669,41 @@ conosce i passi, non conosce l'ordine, non sa che esistono un pagamento e dei
 punti fedeltà. Un partecipante deve solo saper fare — e **rifare senza danni**
 — la sua parte.
 
+---
+
+## G9 — observability (passi 9.4-9.8)
+
+Tre cose, e nessuna richiede una riga di codice scritta a mano:
+
+| dove | cosa |
+|---|---|
+| `/actuator/health/{liveness,readiness}` | «il processo è vivo?» e «posso ricevere traffico?», che sono **due domande diverse** |
+| `/actuator/prometheus` | `http.server.requests`, `hikaricp.connections.active`, `jvm.*` — gratis, da `micrometer-registry-prometheus` |
+| <http://localhost:9411> | le tracce, con il `traceId` propagato da chi ci chiama |
+
+Ogni riga di log porta il `traceId`:
+
+```
+INFO [shows-service,68a1f2c3d4e5,9f8e7d6c5b4a] ...
+```
+
+Con sei servizi, una riga di log senza `traceId` è una riga che non si può
+ricollegare a niente. Con il `traceId` si prendono i log di tutti i servizi, si
+cerca **una** stringa, e si legge la storia di una richiesta dall'inizio alla
+fine.
+
+### Le due trappole del tracing (passo 9.6)
+
+1. **Serve lo starter**, non la coppia di dipendenze di Boot 3: quelle portano
+   le classi ma non l'auto-configurazione. I servizi partono, il `traceId`
+   compare perfino nei log, e Zipkin resta vuoto.
+2. **`sampling` ed `export` stanno sotto la stessa chiave `tracing`.**
+   Scriverli come due blocchi separati crea una chiave YAML duplicata e il
+   servizio non parte affatto — l'unico errore della giornata che si fa notare
+   subito.
+
 ## Stack
 
 Spring Boot 4.1.1 · Java 21 · PostgreSQL 17 · Flyway · springdoc-openapi 3.1.0 ·
 Jackson 3 · Bean Validation · Lombok · Maven · Docker + Compose v2 ·
-Spring Cloud OpenFeign 5.0.3 (train 2025.1.3)
+Spring Cloud OpenFeign 5.0.3 (train 2025.1.3) · Micrometer + Prometheus · Micrometer Tracing + Zipkin

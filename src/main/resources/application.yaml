@@ -59,6 +59,22 @@ logging:
     #     FEIGN_LOG_LEVEL=DEBUG ./mvnw spring-boot:run
     it.its.cinema.showsservice.client: ${FEIGN_LOG_LEVEL:INFO}
 
+  # ===========================================================================
+  # PASSO 9.8 — traceId E spanId IN OGNI RIGA DI LOG.
+  #
+  # Con sei servizi, una riga di log senza traceId e' una riga che non si puo'
+  # ricollegare a niente: si sa che qualcosa e' successo, non si sa dentro
+  # quale richiesta. Con il traceId si prendono i log di tutti i servizi, si
+  # cerca UNA stringa, e si legge la storia di una prenotazione dall'inizio
+  # alla fine.
+  #
+  # %X{traceId:-} legge dall'MDC, e il ":-" e' il valore quando non c'e' —
+  # per esempio nelle righe di avvio, che non stanno dentro nessuna richiesta.
+  # Senza, comparirebbe la stringa letterale "traceId_IS_UNDEFINED".
+  # ===========================================================================
+  pattern:
+    level: "%5p [${spring.application.name},%X{traceId:-},%X{spanId:-}]"
+
 # PASSO 4.4 — da dove si legge il catalogo dei film all'avvio.
 #
 # Il default e' gia' nel codice (@Value con "classpath:catalog.json"), quindi
@@ -80,6 +96,64 @@ cinema:
   # e a passarlo e' il compose: CINEMA_CATALOG_REMOTE_URL=http://catalog-provider
   catalog:
     remote-url: ${CINEMA_CATALOG_REMOTE_URL:http://localhost:8090}
+
+
+# ===========================================================================
+# PASSO 9.4 — ACTUATOR, E DAL G9 STA NEL DOCUMENTO PRINCIPALE.
+#
+# Fino al G8 questo blocco stava sotto il profilo "docker", perche' serviva
+# agli healthcheck del compose e basta. Dal G9 non va piu' bene: le metriche e
+# il tracing servono SEMPRE, anche avviando il servizio dall'IDE — anzi,
+# soprattutto li', perche' e' dove si fanno le prove del passo 9.9.
+#
+# Liveness e readiness restano DUE DOMANDE DIVERSE:
+#   /actuator/health/liveness   "il processo e' vivo?"      se no, riavviami
+#   /actuator/health/readiness  "posso ricevere traffico?"  se no, non mandarmene
+# Un servizio che sta ancora applicando le migrazioni di Flyway e' vivo ma
+# NON pronto. Confonderle porta a due guasti opposti: riavviare in loop un
+# servizio sano, oppure mandare richieste a uno che non sa ancora rispondere.
+# ===========================================================================
+management:
+  endpoints:
+    web:
+      exposure:
+        # PASSO 9.4 e 9.5 — health e info c'erano gia'; metrics e prometheus
+        # sono del G9. /actuator/prometheus e' la rotta che un server
+        # Prometheus verrebbe a leggere ogni quindici secondi.
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always
+
+  # =========================================================================
+  # PASSO 9.6 — IL TRACING, E LA SECONDA TRAPPOLA.
+  #
+  # sampling ed export stanno SOTTO LA STESSA chiave "tracing". Scriverli come
+  # due blocchi separati — un "management: tracing: sampling:" e piu' sotto un
+  # altro "management: tracing: export:" — crea una chiave YAML DUPLICATA, e
+  # in quel caso il servizio non parte affatto. E' l'unico errore della
+  # giornata che si fa notare subito, ed e' quasi un sollievo.
+  #
+  # E la property dell'endpoint e' cambiata rispetto a Boot 3:
+  #     management.tracing.export.zipkin.endpoint   <- questa
+  #     management.zipkin.tracing.endpoint          <- non lega piu'
+  # Anche questa, sbagliata, non da' nessun errore: Zipkin resta vuoto.
+  # =========================================================================
+  tracing:
+    sampling:
+      # 1.0 = si traccia TUTTO: in aula e' quello che serve. In esercizio si
+      # scende a 0.1 o meno, perche' tracciare tutto costa banda, spazio e un
+      # po' di latenza — e con mille richieste al secondo nessuno guardera'
+      # mai le altre 999.
+      probability: ${TRACING_PROBABILITY:1.0}
+    export:
+      zipkin:
+        # Il default e' Zipkin visto DA FUORI Docker, cosi' il tracing
+        # funziona anche avviando il servizio dall'IDE. Dentro la rete di
+        # compose l'indirizzo e' http://zipkin:9411/..., e lo passa il compose.
+        endpoint: ${ZIPKIN_ENDPOINT:http://localhost:9411/api/v2/spans}
 
 # ===========================================================================
 # PASSO 5.4 — il profilo "docker", dopo il separatore ---
@@ -108,20 +182,3 @@ logging:
   level:
     org.hibernate.SQL: ${SQL_LOG_LEVEL:INFO}
     it.its.cinema.showsservice.client: ${FEIGN_LOG_LEVEL:INFO}
-
-# Liveness e readiness sono DUE DOMANDE DIVERSE:
-#   /actuator/health/liveness   "il processo e' vivo?"      se no, riavviami
-#   /actuator/health/readiness  "posso ricevere traffico?"  se no, non mandarmene
-# Un servizio che sta ancora applicando le migrazioni di Flyway e' vivo ma
-# NON pronto. Confonderle porta a due guasti opposti: riavviare in loop un
-# servizio sano, oppure mandare richieste a uno che non sa ancora rispondere.
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health,info
-  endpoint:
-    health:
-      probes:
-        enabled: true
-      show-details: always
